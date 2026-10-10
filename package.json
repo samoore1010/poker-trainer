@@ -1,0 +1,13 @@
+{
+  "name": "hand-walkthrough",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Single-file poker hand trainer with voice card entry.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

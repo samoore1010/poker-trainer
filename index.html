@@ -1,3 +1,7 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hand Walkthrough Table</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
@@ -28,7 +32,7 @@
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
-  body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 14px; line-height: 1.45; overflow: hidden; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 14px; line-height: 1.45; overflow: hidden; }
   .app { height: 100%; display: grid; grid-template-rows: auto 1fr; }
   .bar { display: flex; align-items: center; gap: 14px; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
   .brand { font-family: var(--display); font-weight: 700; font-size: 1.25rem; letter-spacing: .02em; margin-right: auto; }
@@ -184,10 +188,12 @@
     body { overflow: auto; } .app { height: auto; }
     .main { grid-template-columns: 1fr; }
     .room { padding: 10px 12px; }
-    .table { width: 100%; aspect-ratio: 1.35; }
+    .tablewrap { padding: 40px 8px 30px; }
+    .table { width: 100%; aspect-ratio: .9; }
+    .hero { bottom: 6%; }
     .advisor { border-left: 0; border-top: 1px solid var(--line); }
     .pane { overflow: visible; }
-    .seat { width: 76px; } .seat .av { width: 32px; height: 32px; } .nm { font-size: .64rem; }
+    .seat { width: 76px; gap: 1px; } .seat .cards { min-height: 0; } .card.sm { width: 24px; height: 34px; } .act { font-size: .58rem; padding: 1px 5px; } .seat .av { width: 32px; height: 32px; } .nm { font-size: .64rem; }
     .card { width: 36px; height: 50px; } .card .r { font-size: .85rem; } .card .s { font-size: 1.1rem; }
     .card.lg { width: 44px; height: 62px; } .slot { width: 36px; height: 50px; }
     .prog { grid-template-columns: 1fr; }
@@ -450,6 +456,8 @@
   // ----- table -----
   function contributed(i, s) { // money opponent i has put in through street s (inclusive)
     let m = 2; for (let k = 1; k <= Math.min(s, 3); k++) m += hand.bet[k]; return m; }
+  const narrow = window.matchMedia('(max-width: 860px)');
+  narrow.addEventListener('change', () => hand && renderTable());
   function renderTable() {
     const h = hand, n = h.n, nb = BOARD_N[step], bd = board();
     const bEl = $('board'); bEl.innerHTML = ''; const g = glowSet(h.hero, bd);
@@ -464,7 +472,7 @@
     document.querySelectorAll('.seat').forEach(e => e.remove());
     const tb = $('table');
     h.opps.forEach((o, i) => {
-      const a = (90 + (i + 1) * 360 / (n + 1)) * Math.PI / 180;
+      const a = (narrow.matches ? 90 + 62 + (i + 0.5) * (360 - 124) / n : 90 + (i + 1) * 360 / (n + 1)) * Math.PI / 180; // phones keep the bottom of the rail clear for your cards
       const s = document.createElement('div'); s.className = 'seat' + (step === 4 && w.includes(i + 1) ? ' win' : '');
       s.style.left = (50 + 47 * Math.cos(a)) + '%'; s.style.top = (50 + 46 * Math.sin(a)) + '%';
       const cs = document.createElement('div'); cs.className = 'cards';
@@ -512,24 +520,36 @@
   // Natural-language deal parser: "ace of spades, jack of hearts, flop king of hearts ten of hearts two of hearts, turn eight of spades, river three of diamonds" (shorthand like "As Jh" works too).
   const RW = { ace: 12, aces: 12, a: 12, king: 11, kings: 11, k: 11, queen: 10, queens: 10, q: 10, jack: 9, jacks: 9, j: 9, ten: 8, tens: 8, t: 8, '10': 8, nine: 7, nines: 7, '9': 7, eight: 6, eights: 6, '8': 6, seven: 5, sevens: 5, '7': 5, six: 4, sixes: 4, '6': 4, five: 3, fives: 3, '5': 3, four: 2, fours: 2, '4': 2, three: 1, threes: 1, trey: 1, '3': 1, two: 0, twos: 0, deuce: 0, '2': 0 };
   const SW = { club: 0, clubs: 0, c: 0, diamond: 1, diamonds: 1, d: 1, heart: 2, hearts: 2, h: 2, spade: 3, spades: 3, s: 3 };
-  const SECT = { deal: 0, me: 0, hand: 0, hole: 0, you: 0, your: 0, my: 0, flop: 1, turn: 2, river: 3, board: 1 };
+  const SECT = { deal: 0, me: 0, hand: 0, hole: 0, you: 0, your: 0, my: 0, flop: 1, flopped: 1, turn: 2, river: 3, board: 1 };
+  // Words speech recognition often hears in place of a rank or suit. They only count when a suit follows, so "to the turn" stays harmless.
+  const RW_SOUND = { for: 2, fore: 2, to: 0, too: 0, tu: 0, ate: 6, tree: 1, free: 1, nein: 7, tin: 8, jacques: 9, que: 10, kay: 11, ay: 12, eh: 12 };
+  const SW_SOUND = { harts: 2, hards: 2, heart: 2, arts: 2, spayed: 3, spaded: 3, spades: 3, space: 3, spaces: 3, clovers: 0, clover: 0, clubbed: 0, diamond: 1, diamonte: 1, dimonds: 1 };
+  const suitWord = w => w in SW ? SW[w] : w in SW_SOUND ? SW_SOUND[w] : undefined;
+  // Ranks said without a suit wait for the next suit word, so "ten nine two of clubs" is three clubs.
   function parseDeal(text) {
-    const toks = text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
-    const groups = [[], [], [], []]; let g = 0, errs = [];
+    const toks = text.toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+    const groups = [[], [], [], []]; let g = 0, errs = [], held = [];
     const push = c => { if (groups.flat().includes(c)) { errs.push(RANKS[rankOf(c)] + SYM[suitOf(c)] + ' twice'); return; } groups[g].push(c); };
+    const flushHeld = () => { held.forEach(w => errs.push(`${w}: no suit`)); held = []; };
     for (let i = 0; i < toks.length; i++) {
       const w = toks[i];
-      if (w in SECT) { g = SECT[w]; continue; }
-      if (w === 'of' || w === 'the' || w === 'and' || w === 'is' || w === 'a' && !(toks[i + 1] in SW) ) continue;
-      let r = null, sIdx = null;
+      if (w in SECT) { flushHeld(); g = SECT[w]; continue; }
+      if (w === 'of' || w === 'the' || w === 'and' || w === 'is' || w === 'a' && suitWord(toks[i + 1]) === undefined) continue;
       const m = w.match(/^(10|[2-9]|[akqjt])([cdhs])$/); // shorthand As, 10h, Kd
-      if (m) { r = RW[m[1]]; push(r * 4 + SW[m[2]]); continue; }
-      if (w in RW) { r = RW[w]; let j = i + 1; if (toks[j] === 'of') j++; if (toks[j] in SW) { push(r * 4 + SW[toks[j]]); i = j; } else errs.push(`${w}: no suit`); continue; }
+      if (m) { flushHeld(); push(RW[m[1]] * 4 + SW[m[2]]); continue; }
+      if (w in RW || w in RW_SOUND) {
+        let j = i + 1; if (toks[j] === 'of' || toks[j] === 'a') j++;
+        const su = suitWord(toks[j]), strong = w in RW && (w.length > 1 || /\d/.test(w));
+        if (su !== undefined) { held.concat(w).forEach(x => push((x in RW ? RW[x] : RW_SOUND[x]) * 4 + su)); held = []; i = j; }
+        else if (strong) held.push(w);
+      }
     }
+    flushHeld();
     return { groups, errs };
   }
-  function applyParsed(text) {
+  function applyParsed(text, live) {
     const { groups, errs } = parseDeal(text);
+    if (live && !groups.flat().length) return;
     const all = groups.flat();
     const np = [null, null, null, null, null, null, null];
     if (groups[0].length + groups[1].length + groups[2].length + groups[3].length && !groups[1].length && !groups[2].length && !groups[3].length) {
@@ -543,28 +563,77 @@
     }
     if (!all.length) { sayNote('No cards recognized. Try "ace of spades, jack of hearts" or "As Jh".', true); return; }
     pick = np; renderPicker();
+    if (live) { sayNote(`Heard ${all.length} card${all.length > 1 ? 's' : ''} so far. Keep going, or click the mic to stop.`); return; }
     sayNote(errs.length ? 'Set what I could. Skipped: ' + errs.join(', ') : `Set ${all.length} card${all.length > 1 ? 's' : ''}. Check the slots, then deal.`, errs.length > 0);
   }
   function sayNote(t, err) { const n = $('sayNote'); n.textContent = t; n.classList.toggle('err', !!err); }
   $('sayBtn').addEventListener('click', () => applyParsed($('sayIn').value));
   $('sayIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyParsed($('sayIn').value); } });
-  // Microphone: browser speech recognition where the host allows it; otherwise OS dictation into the text box still works.
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition; let rec = null;
-  if (!SR) $('micBtn').hidden = true;
-  $('micBtn').addEventListener('click', () => {
-    if (rec) { rec.stop(); return; }
+  // Microphone: browser speech recognition (Chrome, Edge, Safari) on a secure page. Dictation keeps listening through pauses,
+  // fills the slots as each phrase is recognized, and stops on a second click, Escape, closing the picker, or a few seconds of silence.
+  // Where speech recognition is missing (Firefox) or blocked, OS dictation into the text box still works.
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const OS_DICTATION = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? 'press Fn twice (or the keyboard mic) to dictate into the box' : /Win/.test(navigator.platform || '') ? 'press Win+H to dictate into the box' : 'use your keyboard\'s dictation to speak into the box';
+  const SILENCE_MS = 4000;
+  let rec = null, micFinal = '', micErr = null, micTimer = 0;
+  const micBtn = $('micBtn');
+  if (!SR) { micBtn.hidden = true; $('sayNote').textContent += ` This browser has no built-in speech recognition (Chrome, Edge or Safari do); ${OS_DICTATION}.`; }
+  else if (!window.isSecureContext) { micBtn.disabled = true; micBtn.title = 'Dictation needs an https:// page'; }
+  function micUi(live) { micBtn.classList.toggle('live', live); micBtn.setAttribute('aria-pressed', live ? 'true' : 'false'); micBtn.title = live ? 'Stop dictation' : 'Dictate'; micBtn.setAttribute('aria-label', live ? 'Stop dictation' : 'Dictate with microphone'); }
+  async function micBlockedReason(code) {
+    if (code === 'audio-capture') {
+      try { const devs = await navigator.mediaDevices.enumerateDevices(); if (!devs.some(d => d.kind === 'audioinput')) return 'No microphone was found. Plug one in or pick an input in your system sound settings.'; } catch (e) {}
+      return 'The microphone could not be opened. Another app may be using it; close it and try again.';
+    }
+    let state = null; try { state = (await navigator.permissions.query({ name: 'microphone' })).state; } catch (e) {}
+    if (window.top !== window.self) return `This page is embedded in a viewer that blocks the microphone. Open the app in its own tab, or ${OS_DICTATION}.`;
+    if (state === 'denied') return 'Microphone access is blocked for this site. Click the lock or site-settings icon in the address bar, allow Microphone, then reload.';
+    if (code === 'service-not-allowed') return `This browser's speech service is turned off. In Safari, enable Siri or Dictation in system settings; otherwise ${OS_DICTATION}.`;
+    return 'Microphone permission was not granted. Click the mic again and choose Allow.';
+  }
+  const MIC_ERR = {
+    'no-speech': 'No speech heard. Click the mic and say your cards, like "ace of spades, king of hearts".',
+    network: `Speech recognition needs an internet connection to the browser's speech service. Check your connection, or ${OS_DICTATION}.`,
+    'language-not-supported': `This browser can't recognize English speech. ${cap(OS_DICTATION)}.`,
+    'bad-grammar': 'Speech recognition failed. Try again.',
+  };
+  function armSilence() { clearTimeout(micTimer); micTimer = setTimeout(() => { if (rec) rec.stop(); }, SILENCE_MS); }
+  function stopMic() { if (rec) { try { rec.stop(); } catch (e) {} } }
+  function startMic() {
+    micFinal = ''; micErr = null; $('sayIn').value = '';
     try {
-      rec = new SR(); rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = false;
-      rec.onresult = e => { let t = ''; for (const r of e.results) t += r[0].transcript + ' '; $('sayIn').value = t.trim(); if (e.results[e.results.length - 1].isFinal) applyParsed(t); };
-      rec.onerror = e => { sayNote(e.error === 'not-allowed' || e.error === 'service-not-allowed' ? 'The microphone is blocked in this viewer. Use your system dictation key to speak into the text box, or open the file directly in Chrome.' : 'Microphone error: ' + e.error, true); };
-      rec.onend = () => { rec = null; $('micBtn').classList.remove('live'); };
-      rec.start(); $('micBtn').classList.add('live'); sayNote('Listening…');
-    } catch (err) { rec = null; sayNote('Microphone not available here. Use system dictation into the text box.', true); }
-  });
+      rec = new SR(); rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = true; rec.maxAlternatives = 1;
+    } catch (err) { rec = null; sayNote(`Dictation isn't available in this browser. ${cap(OS_DICTATION)}.`, true); return; }
+    const r = rec;
+    r.onstart = () => { micUi(true); sayNote('Listening… say your cards, like "ace of spades, king of hearts, flop ten, nine, two of clubs". Click the mic to stop.'); armSilence(); };
+    r.onresult = e => {
+      if (r !== rec) return;
+      let fin = '', interim = '';
+      for (let i = 0; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) fin += t + ' '; else interim += t + ' '; }
+      const heard = (fin + interim).replace(/\s+/g, ' ').trim();
+      $('sayIn').value = heard;
+      if (fin.trim() && fin !== micFinal) { micFinal = fin; applyParsed(micFinal, true); }
+      armSilence();
+    };
+    r.onerror = e => { if (e.error !== 'aborted') micErr = e.error; };
+    r.onend = async () => {
+      if (r !== rec) return;
+      rec = null; clearTimeout(micTimer); micUi(false);
+      const text = $('sayIn').value.trim();
+      if (micErr === 'not-allowed' || micErr === 'service-not-allowed' || micErr === 'audio-capture') sayNote(await micBlockedReason(micErr), true);
+      else if (micErr && !text) sayNote(MIC_ERR[micErr] || 'Dictation stopped: ' + micErr, true);
+      else if (text) applyParsed(text);
+      else sayNote(MIC_ERR['no-speech'], true);
+    };
+    try { r.start(); sayNote('Starting the microphone… allow access if your browser asks.'); }
+    catch (err) { rec = null; micUi(false); sayNote('Could not start the microphone. Try again.', true); }
+  }
+  micBtn.addEventListener('click', () => { if (rec) stopMic(); else startMic(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') stopMic(); });
   $('deck').addEventListener('click', e => { const b = e.target.closest('[data-card]'); if (!b) return; const c = +b.dataset.card; const at = pick.indexOf(c); if (at >= 0) { pick[at] = null; } else { const i = pick.indexOf(null); if (i < 0) return; pick[i] = c; } renderPicker(); });
   $('slots').addEventListener('click', e => { const s = e.target.closest('[data-slot]'); if (!s) return; pick[+s.dataset.slot] = null; renderPicker(); });
   $('pkClear').addEventListener('click', () => { pick = [null, null, null, null, null, null, null]; $('sayIn').value = ''; renderPicker(); sayNote('Click cards to fill the slots, or describe the deal above.'); });
-  function setPicker(open) { $('picker').hidden = !open; $('pickBtn').setAttribute('aria-expanded', open ? 'true' : 'false'); if (open) renderPicker(); }
+  function setPicker(open) { if (!open) stopMic(); $('picker').hidden = !open; $('pickBtn').setAttribute('aria-expanded', open ? 'true' : 'false'); if (open) renderPicker(); }
   $('pkDeal').addEventListener('click', () => { const [ok] = pickStatus(); if (!ok) return; const bd = pick.slice(2).filter(x => x !== null); setPicker(false); deal([pick[0], pick[1]], bd); });
   $('pickBtn').addEventListener('click', () => setPicker($('picker').hidden));
   $('pkClose').addEventListener('click', () => setPicker(false));
