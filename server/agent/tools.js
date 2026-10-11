@@ -111,6 +111,8 @@ function calculate(sc, street) {
     to_call: Math.round(m.toCall[s] * 100) / 100,
   };
   if (r.warnings.length) out.warnings = r.warnings;
+  const rec = S.recommendation(sc, s, hero, board, r);
+  out.recommendation = { action: rec.label, size: rec.sizeText || undefined, close_call: rec.close || undefined, reasons: rec.reasons };
   if (out.to_call > 0) { out.pot_odds_need_pct = pct(out.to_call / (out.pot + out.to_call) * 100); out.call_beats_pot_odds = out.win_pct >= out.pot_odds_need_pct; }
   if (board.length >= 3) {
     const T = E.threatsNow(hero, board, opps);

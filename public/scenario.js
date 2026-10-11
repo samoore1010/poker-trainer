@@ -345,5 +345,34 @@
     return lines.join('\n');
   }
 
-  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, randomizeAction, positions, seatOfPosition, blindOf, money, liveOpponents, engineOpponents, effRange, rangeLabel, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom };
+
+  // Collects what the advice rules need from the scenario at street s, then asks the engine.
+  // hero/board are card ints (board = cards visible at s); eq = engine equity result for the same spot.
+  function recommendation(sc, s, hero, board, eq) {
+    const m = money(sc), pos = positions(sc), players = sc.opponents.length + 1;
+    const live = liveOpponents(sc, s), st = sc.streets[s];
+    // preflop order: UTG first … BB last (heads-up: button first); postflop: SB first … button last
+    const pre = players === 2 ? [sc.button, (sc.button + 1) % 2] : Array.from({ length: players }, (_, i) => (sc.button + 3 + i) % players);
+    const postIdx = seat => (seat - sc.button - 1 + players * 2) % players;
+    const inPosition = live.every(x => postIdx(0) > postIdx(x));
+    const agg = st.aggressor === null ? 'none' : st.aggressor === 0 ? 'hero' : 'opp';
+    let raiserPct = 20, raiserLabel = '';
+    if (agg === 'opp') {
+      const o = sc.opponents[st.aggressor - 1], r = effRange(o);
+      raiserLabel = `${o.name} (${pos[st.aggressor]})`;
+      raiserPct = r ? E.rangeOf(r).pct : E.openPct(players - 1 - pre.indexOf(st.aggressor), players);
+    }
+    // preflop: opponents who put chips in voluntarily (blinds don't count as limpers in an unraised pot)
+    const callers = s === 0 ? m.live[0].filter(x => x > 0 && x !== st.aggressor && !st.folds.includes(x) && (agg === 'opp' || !['SB', 'BB'].includes(pos[x]))).length : 0;
+    const ctx = {
+      street: s, hero, board, eq, live: live.length, players, position: pos[0], behind: players - 1 - pre.indexOf(0), inPosition,
+      toCall: m.toCall[s], pot: m.potShow[s], bb: sc.bigBlind, aggressor: agg, bet: m.level[s], raiserPct, raiserLabel,
+      callers: agg === 'opp' ? Math.max(0, callers) : callers,
+      station: live.some(x => /station|fish/.test(sc.opponents[x - 1].style || '')),
+      rangesSet: live.some(x => { const o = sc.opponents[x - 1]; return o.cards || effRange(o); }),
+    };
+    return E.recommend(ctx);
+  }
+
+  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, randomizeAction, positions, seatOfPosition, blindOf, money, liveOpponents, engineOpponents, effRange, rangeLabel, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, recommendation };
 });
