@@ -140,6 +140,17 @@
   .sugg { display: grid; gap: 6px; }
   .sugg button { text-align: left; font-size: .8rem; line-height: 1.35; }
   ul.opps { font-size: .8rem; }
+  .advice .adv-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .advice .adv-act { font: 700 1.9rem var(--display); letter-spacing: .02em; line-height: 1; text-transform: uppercase; }
+  .advice.bad .adv-act { color: var(--bad); } .advice.good .adv-act { color: var(--good); } .advice.mid .adv-act { color: var(--warn); }
+  .advice .adv-size { font: 600 .95rem var(--mono); }
+  .gauge { position: relative; display: grid; grid-template-columns: 1fr 1fr 1fr; height: 22px; border-radius: 6px; overflow: visible; margin: 4px 0 2px; }
+  .gauge span { display: grid; place-items: center; font: 600 .62rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: #fff; }
+  .gauge span:nth-child(1) { background: color-mix(in srgb, var(--bad) 75%, transparent); border-radius: 6px 0 0 6px; }
+  .gauge span:nth-child(2) { background: color-mix(in srgb, var(--warn) 75%, transparent); }
+  .gauge span:nth-child(3) { background: color-mix(in srgb, var(--good) 75%, transparent); border-radius: 0 6px 6px 0; }
+  .gauge i { position: absolute; top: -5px; bottom: -5px; width: 4px; margin-left: -2px; border-radius: 2px; background: var(--fg); box-shadow: 0 0 0 2px var(--panel); transition: left .25s ease; }
+  .adv-why { font-size: .8rem; }
   .spk { padding: 1px 7px; font-size: .9rem; line-height: 1.2; border-color: transparent; background: transparent; }
   .pk-act .note { margin-right: auto; }
 
@@ -773,6 +784,17 @@
     const LIM = 4, extra = rows.length - LIM;
     return `<div class="rows r${two ? 2 : 1}" id="threats"><div class="hd"><span>Beaten by</span><span>Now</span>${two ? '<span>By river</span>' : ''}</div>${rows.map((r, i) => row(r).replace('class="row"', i >= LIM ? 'class="row hid"' : 'class="row"')).join('')}</div>` + (extra > 0 ? `<button class="more" data-more="threats" data-n="${extra}">Show ${extra} more</button>` : '');
   }
+  // "What you should do": rule-of-thumb advice from position, hand strength, the board and the price (engine.recommend).
+  function adviceBlock(S) {
+    const r = SC.recommendation(scenario, step, hand.hero, board(), S);
+    const cls = { fold: 'bad', check: 'mid', call: 'mid', bet: 'good', raise: 'good', wait: 'mid' }[r.action];
+    const pot = hand.m.potShow[step];
+    const size = !r.size ? '' : r.action === 'raise' ? `to ${money(r.size)}` : `${money(r.size)} · about ${Math.round(r.size / pot * 100)}% of the pot`;
+    return `<section class="blk advice ${cls}"><h3>What you should do <small>rule of thumb, not a solver</small></h3>
+      <div class="adv-top"><span class="adv-act">${esc(r.label)}</span>${size ? `<span class="adv-size">${size}</span>` : ''}${r.close ? '<span class="chip">close call</span>' : ''}</div>
+      <div class="gauge" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${r.gauge}" aria-label="Recommendation strength from fold to raise"><span>Fold</span><span>Check · Call</span><span>Bet · Raise</span><i style="left:${r.gauge}%"></i></div>
+      <ul class="adv-why">${r.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>${r.note ? `<p class="note">${esc(r.note)}</p>` : ''}</section>`;
+  }
   function rangeList(s) {
     const seats = liveSeats(s); if (!seats.length) return '';
     return `<ul class="opps">${seats.map(seat => { const o = scenario.opponents[seat - 1]; return `<li><b>${esc(o.name)}</b> <span class="note">${esc(hand.pos[seat])}</span> ${esc(SC.rangeLabel(o))}</li>`; }).join('')}</ul>`;
@@ -805,6 +827,7 @@
     if (needGuess()) { $('pane').innerHTML = topBlock(null, 0) + guessHist(); $('guessBtn').addEventListener('click', revealGuess); $('guessIn').addEventListener('keydown', e => { if (e.key === 'Enter') revealGuess(); }); $('guessIn').focus(); sim(step); return; }
     const S = sim(step), chance = S ? S.chance : null;
     if (tab === 'read') {
+      html += S ? adviceBlock(S) : blk('What you should do', '<p class="note calc">Reading the spot…</p>');
       html += topBlock(S, chance);
       const vs = vsLabel(step), live = liveSeats(step).length;
       if (!S) html += blk('Working', '<p class="note calc">Running the numbers…</p>');

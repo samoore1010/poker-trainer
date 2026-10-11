@@ -281,10 +281,143 @@
     return out;
   }
 
+
+  // ----- "what you should do": rule-of-thumb advice, not a solver -----
+  // Board texture: how many draws the board allows (decides bet sizing).
+  function texture(board) {
+    if (board.length < 3) return { wet: false, words: '' };
+    const suits = [0, 0, 0, 0]; board.forEach(c => suits[suitOf(c)]++);
+    const maxSuit = Math.max(...suits), ranks = [...new Set(board.map(rankOf))].sort((a, b) => a - b);
+    const paired = ranks.length < board.length;
+    let connected = false; for (let i = 0; i + 2 < ranks.length; i++) if (ranks[i + 2] - ranks[i] <= 4) connected = true;
+    const words = [maxSuit >= 3 ? `${maxSuit} of one suit` : maxSuit === 2 && board.length < 5 ? 'a flush draw possible' : '', connected ? 'connected cards' : '', paired ? 'a pair on board' : ''].filter(Boolean);
+    return { wet: maxSuit >= 3 || (maxSuit === 2 && board.length < 5) || connected, paired, words: words.join(', ') };
+  }
+  // Cards that would give you a straight or flush next (your draw), with a label.
+  function drawOuts(hero, board) {
+    if (board.length < 3 || board.length >= 5) return { outs: 0, label: '' };
+    const g = nextCardGroups(hero, board); let outs = 0; const kinds = [];
+    g.groups.forEach((cards, key) => { if (key === 'C4' || key === 'C5' || key === 'C8') { outs += cards.length; kinds.push(key === 'C5' ? 'flush' : key === 'C4' ? 'straight' : 'straight flush'); } });
+    return { outs, label: kinds.length ? `${kinds.join(' and ')} draw` : '' };
+  }
+  // Share of hands a player in this preflop slot usually opens (by how many players act after them).
+  function openPct(behind, players) {
+    if (players === 2) return 80;
+    return [100, 40, 43, 29, 23, 18, 16, 14, 13][Math.min(Math.max(behind, 0), 8)];
+  }
+  const roundChips = (x, bb) => { const step = bb >= 2 ? 1 : 0.5; return Math.max(bb, Math.round(x / step) * step); };
+  const clamp01 = x => Math.max(0, Math.min(1, x));
+
+  // ctx: {street, hero:[c,c], board, eq (equity result), live (opponents in), players, position, behind (preflop),
+  //   inPosition, toCall, pot (before your call), bb, aggressor: 'none'|'hero'|'opp', bet (current street bet),
+  //   raiserPct, raiserLabel, callers, station, rangesSet}
+  // → {action: fold|check|call|bet|raise|wait, label, size, gauge 0-100, close, reasons[], note}
+  function recommend(ctx) {
+    const { street, hero, board, eq, live, bb } = ctx;
+    const win = eq.chance, need = ctx.toCall > 0 ? ctx.toCall / (ctx.pot + ctx.toCall) * 100 : 0;
+    const reasons = [], fmt = x => (x > 0 && x < 0.95 ? 'under 1' : Math.round(x * 10) / 10);
+    const out = (action, t, opts = {}) => {
+      const zone = action === 'fold' ? 0 : action === 'check' || action === 'call' ? 1 : action === 'wait' ? 1 : 2;
+      const label = { fold: 'Fold', check: 'Check', call: 'Call', bet: 'Bet', raise: 'Raise', wait: 'Your bet stands' }[action];
+      return { action, label, size: opts.size || null, sizeText: opts.sizeText || '', gauge: Math.round((zone + clamp01(t)) / 3 * 100), close: !!opts.close, reasons, note: ctx.rangesSet ? '' : 'Opponents are treated as random hands. Give them a range or style for sharper advice.' };
+    };
+    if (!live) { reasons.push('Everyone else has folded: the pot is yours.'); return out('wait', 1); }
+
+    // ---------- preflop: position-based ranges ----------
+    if (street === 0) {
+      const label = handLabel(hero[0], hero[1]), top = PCT[label];
+      const [hi, lo] = hero.map(rankOf).sort((a, b) => b - a), suited = suitOf(hero[0]) === suitOf(hero[1]);
+      const spec = hi === lo || (suited && (hi - lo <= 3 || hi === 12));
+      const handTxt = `${label} is in the top ${Math.round(top)}% of starting hands`;
+      if (ctx.aggressor === 'hero') { reasons.push(`You raised to ${ctx.bet}. ${handTxt}.`); return out('wait', clamp01((40 - top) / 40)); }
+      if (ctx.aggressor === 'opp') {
+        const r = ctx.raiserPct, size = ctx.bet / bb, sizeF = Math.max(0.55, Math.min(1.15, 3 / size));
+        let threeBet = Math.max(2, r * 0.22) * sizeF, call = r * 0.65 * sizeF;
+        if (ctx.position === 'BB') call *= 1.35; else if (ctx.position === 'SB') call *= 0.8; else if (ctx.inPosition) call *= 1.15;
+        if (ctx.callers >= 1) { threeBet *= 0.8; call *= spec ? 1.25 : 0.85; }
+        reasons.push(`${ctx.raiserLabel} raised to ${ctx.bet} (${fmt(size)} big blinds), a range of about the top ${Math.round(r)}% of hands.`);
+        reasons.push(`${handTxt}.`);
+        if (top <= threeBet) {
+          const to = roundChips(ctx.bet * (ctx.inPosition ? 3 : 3.8) + ctx.callers * ctx.bet, bb);
+          reasons.push(`That is strong enough to re-raise for value${ctx.inPosition ? ' in position' : ''}.`);
+          return out('raise', clamp01((threeBet - top) / threeBet + 0.3), { size: to, sizeText: `to ${to}` });
+        }
+        if (top <= call || win >= need + 12) {
+          reasons.push(win >= need ? `You win ${fmt(win)}% against them and need ${fmt(need)}% to call.` : `Calling needs ${fmt(need)}%; you have ${fmt(win)}% now, and ${spec ? 'this hand can make strong pairs, straights or flushes' : 'position helps you play the later streets'}.`);
+          if (ctx.position === 'BB') reasons.push('In the big blind you already have chips in, so you can defend wider.');
+          return out('call', clamp01((call - top) / call * 0.8 + 0.2), { close: top > call * 0.8 });
+        }
+        reasons.push(`Too weak to continue against that range${ctx.inPosition ? '' : ' out of position'}.`);
+        return out('fold', clamp01(1 - (top - call) / Math.max(call, 10)), { close: top < call * 1.25 });
+      }
+      // nobody has raised
+      const open = openPct(ctx.behind, ctx.players);
+      if (ctx.position === 'BB') {
+        reasons.push(`${handTxt}. Nobody raised, so you can see the flop for free.`);
+        if (top <= 10) { const to = roundChips(bb * 4 + ctx.callers * bb, bb); reasons.push('Raise to build the pot with a premium hand.'); return out('raise', clamp01((10 - top) / 10 + 0.3), { size: to, sizeText: `to ${to}` }); }
+        return out('check', 0.5);
+      }
+      reasons.push(`From ${ctx.position} players usually open about the top ${open}% of hands; ${handTxt}.`);
+      if (top <= open) {
+        const to = roundChips(bb * (ctx.position === 'SB' ? 3.5 : 3) + ctx.callers * bb, bb);
+        if (ctx.callers) reasons.push(`Raise ${ctx.callers > 1 ? `over ${ctx.callers} limpers` : 'over the limper'} rather than calling.`);
+        return out('raise', clamp01((open - top) / open + 0.25), { size: to, sizeText: `to ${to}` });
+      }
+      if (ctx.position === 'SB' && ctx.callers && top <= 60) { reasons.push('Completing the small blind is cheap with players already in.'); return out('call', 0.3, { close: true }); }
+      if (ctx.callers && spec && top <= open * 2.2) { reasons.push('With limpers in, a speculative hand can call cheaply and hope to hit big.'); return out('call', 0.25, { close: true }); }
+      reasons.push('Not strong enough to play from here.');
+      return out('fold', clamp01(1 - (top - open) / open), { close: top <= open * 1.3 });
+    }
+
+    // ---------- flop, turn, river: your chances against what it costs ----------
+    const tex = texture(board), draw = drawOuts(hero, board), river = street === 3, made = describe(hero, board);
+    const pos = ctx.inPosition ? 'in position' : 'out of position';
+    reasons.push(`You win ${fmt(win)}% ${live > 1 ? `against ${live} opponents` : 'against your opponent'}${ctx.rangesSet ? ' (given their likely hands)' : ''}.`);
+    if (ctx.aggressor === 'hero') { reasons.push(`You bet ${ctx.bet}; the stats assume they call.`); return out('wait', clamp01(win / 100)); }
+    if (ctx.toCall > 0) {
+      reasons.push(`Calling ${ctx.toCall} into ${fmt(ctx.pot)} needs ${fmt(need)}% to break even.`);
+      if (win >= need) {
+        const raiseAt = Math.max(70, need + 35);
+        if (win >= raiseAt) {
+          const to = roundChips(ctx.bet * (river ? 2.5 : 3) + ctx.pot * 0.2, bb);
+          reasons.push(`You're well ahead (${fmt(win)}% vs ${fmt(need)}% needed): raise for value${tex.wet && !river ? ' and charge the draws' : ''}.`);
+          return out('raise', clamp01((win - raiseAt) / 30 + 0.3), { size: to, sizeText: `to ${to}` });
+        }
+        if (win < need + 5) reasons.push('Only just profitable: a close call.');
+        else if (!river && draw.outs >= 8) reasons.push(`Your ${draw.label} (${draw.outs} cards) adds to your chances.`);
+        return out('call', clamp01((win - need) / Math.max(raiseAt - need, 1)), { close: win < need + 5 });
+      }
+      if (!river && draw.outs >= 8 && win >= need * 0.7) {
+        reasons.push(`Slightly short of the price, but your ${draw.label} (${draw.outs} cards) can win a bigger pot later when it hits (implied odds).`);
+        return out('call', 0.1, { close: true });
+      }
+      reasons.push(river ? 'Nothing more can come: the price is too high.' : `Not enough to call${draw.outs ? ` even counting your ${draw.label}` : ''}.`);
+      return out('fold', clamp01(win / need), { close: win >= need * 0.85 });
+    }
+    // checked to you (or you act first)
+    let valueAt = live === 1 ? (river ? 60 : 56) : Math.max(30, 100 / (live + 1) * 1.5);
+    if (ctx.station) { valueAt -= 6; reasons.push('A calling station is in the hand: bet thinner for value, and don\'t bluff.'); }
+    const frac = river && win >= 85 ? 0.8 : tex.wet ? 0.7 : 0.5;
+    const size = roundChips(ctx.pot * (frac + (live > 1 ? 0.1 : 0)), bb), pctPot = Math.round(size / ctx.pot * 100);
+    if (win >= valueAt) {
+      reasons.push(`${cap(made.text.replace(/<[^>]+>/g, ''))} is ahead often enough to bet for value (${fmt(win)}% vs about ${Math.round(valueAt)}% needed).`);
+      if (tex.wet && !river) reasons.push(`The board has ${tex.words}: bet bigger to make draws pay.`);
+      return out('bet', clamp01((win - valueAt) / 30 + 0.3), { size, sizeText: `${size} (about ${pctPot}% of the pot)` });
+    }
+    if (!river && draw.outs >= 8 && live <= 2 && !ctx.station) {
+      reasons.push(`Your ${draw.label} (${draw.outs} cards) makes a good semi-bluff ${pos}: you can win now, or improve.`);
+      const sb = roundChips(ctx.pot * 0.6, bb);
+      return out('bet', 0.15, { size: sb, sizeText: `${sb} (about 60% of the pot)`, close: true });
+    }
+    reasons.push(`Not strong enough to bet${live > 1 ? ` into ${live} players` : ''}; check and see what they do${ctx.inPosition ? '' : ''}.`);
+    return out('check', clamp01(win / valueAt));
+  }
+
   return {
     RANKS, SUITS, SYM, RN, RP, SN, CATN, DECK, ORDER, PCT, STYLES, B, M,
     rankOf, suitOf, rnd, shuffle, cap, cardFromCode, codeOf, cardText,
     evalHand, cat, describe, preflopShort, pathOf, curCatOf, relLabel, catOrd, handLabel,
     combosOfClass, parseRange, rangeOf, equity, threatsNow, describeCombos, nextCardGroups, winChanceQuick, handCards,
+    texture, drawOuts, openPct, recommend,
   };
 });
