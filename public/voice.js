@@ -34,6 +34,39 @@
       }
       throw new ApiError(res.status, err.code, err.message);
     },
+    // POST JSON and read an NDJSON stream; onEvent gets each event. Resolves with the final {type:'done'} event.
+    async stream(path, payload, onEvent, retried = false) {
+      const code = store.get(CODE_KEY);
+      let res;
+      try { res = await fetch(path, { method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson', ...(code ? { 'X-Access-Code': code } : {}) } }); }
+      catch (e) { throw new ApiError(0, 'offline', 'Could not reach the server. Check your connection.'); }
+      if (!res.ok) {
+        let err = { code: 'http_' + res.status, message: `Server error ${res.status}` };
+        try { err = (await res.json()).error || err; } catch (e) {}
+        if (err.code === 'access_code_required' && !retried) {
+          const entered = window.prompt(code ? 'That access code did not work. Enter the access code:' : 'Enter the access code:');
+          if (entered) { store.set(CODE_KEY, entered.trim()); return this.stream(path, payload, onEvent, true); }
+          store.set(CODE_KEY, null);
+        }
+        throw new ApiError(res.status, err.code, err.message);
+      }
+      const reader = res.body.getReader(), dec = new TextDecoder();
+      let buf = '', done = null;
+      const handle = line => {
+        if (!line.trim()) return;
+        let ev; try { ev = JSON.parse(line); } catch (e) { return; }
+        if (ev.type === 'error') throw new ApiError(502, ev.code, ev.message);
+        if (ev.type === 'done') done = ev; else onEvent(ev);
+      };
+      for (;;) {
+        const { value, done: end } = await reader.read();
+        if (value) { buf += dec.decode(value, { stream: true }); const lines = buf.split('\n'); buf = lines.pop(); lines.forEach(handle); }
+        if (end) break;
+      }
+      handle(buf);
+      if (!done) throw new ApiError(0, 'incomplete', 'The connection closed before the coach finished. Try again.');
+      return done;
+    },
     transcribe(blob, { context = 'cards', lang = 'en' } = {}) {
       return this.request(`/api/transcribe?context=${encodeURIComponent(context)}&lang=${encodeURIComponent(lang)}`, { body: blob, headers: { 'Content-Type': blob.type || 'audio/webm' } });
     },

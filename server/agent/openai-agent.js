@@ -7,15 +7,23 @@ function textOf(res) {
   return (res.output || []).filter(o => o.type === 'message').flatMap(o => o.content || []).filter(c => c.type === 'output_text').map(c => c.text).join('').trim();
 }
 
-function createOpenAIAgent({ openai, model, maxRounds = 8 }) {
+function createOpenAIAgent({ openai, model, maxRounds = 4, reasoning = 'low' }) {
+  let sendReasoning = !!reasoning && reasoning !== 'off'; // dropped automatically if the model rejects it
   return {
     name: 'openai', model,
-    async run({ system, history, userText, tools, execute }) {
+    async run({ system, history, userText, tools, execute, onRound = () => {} }) {
       const fnTools = tools.map(t => ({ type: 'function', name: t.name, description: t.description, parameters: t.parameters, strict: false }));
       let input = history.map(h => ({ role: h.role, content: h.text })).concat([{ role: 'user', content: userText }]);
       let prev = null;
       for (let round = 0; round < maxRounds; round++) {
-        const res = await openai.responses({ model, instructions: system, input, tools: fnTools, ...(prev ? { previous_response_id: prev } : {}) });
+        onRound(round);
+        const body = { model, instructions: system, input, tools: fnTools, parallel_tool_calls: true, ...(prev ? { previous_response_id: prev } : {}) };
+        let res;
+        try { res = await openai.responses(sendReasoning ? { ...body, reasoning: { effort: reasoning } } : body); }
+        catch (e) {
+          if (!sendReasoning || !/reasoning/i.test(e.message)) throw e;
+          sendReasoning = false; res = await openai.responses(body);
+        }
         prev = res.id;
         const calls = (res.output || []).filter(o => o.type === 'function_call');
         if (!calls.length) return { reply: textOf(res) };

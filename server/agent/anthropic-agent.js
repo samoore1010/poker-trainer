@@ -5,14 +5,15 @@ const Anthropic = require('@anthropic-ai/sdk').default;
 const { betaTool } = require('@anthropic-ai/sdk/helpers/beta/json-schema');
 const { HttpError } = require('../http');
 
-function createAnthropicAgent({ apiKey, model, effort, maxRounds = 8, timeoutMs = 60000, baseURL }) {
+function createAnthropicAgent({ apiKey, model, effort = 'low', maxRounds = 4, timeoutMs = 60000, baseURL }) {
   const client = new Anthropic({ apiKey, timeout: timeoutMs, maxRetries: 2, ...(baseURL ? { baseURL } : {}) });
   return {
     name: 'anthropic', model,
-    async run({ system, history, userText, tools, execute }) {
+    async run({ system, history, userText, tools, execute, onRound = () => {} }) {
+      onRound(0);
       const runnable = tools.map(t => betaTool({
         name: t.name, description: t.description, inputSchema: t.parameters,
-        run: async input => JSON.stringify(execute(t.name, input)),
+        run: async input => { const out = JSON.stringify(execute(t.name, input)); onRound(1); return out; },
       }));
       const messages = history.map(h => ({ role: h.role, content: h.text })).concat([{ role: 'user', content: userText }]);
       let final;
