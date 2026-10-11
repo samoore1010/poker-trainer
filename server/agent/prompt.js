@@ -8,7 +8,9 @@ How the table works
 - Seat 0 is the user ("you"). Opponents are seats 1-8, clockwise. Positions (BTN, SB, BB, UTG, HJ, CO, …) follow the dealer button.
 - Cards are codes: rank 2-9 T J Q K A plus suit c d h s ("Ah" = ace of hearts, "Td" = ten of diamonds).
 - Opponents hold a random hand unless you give them known cards, a range ("QQ+, AKs, AQo+, A5s-A2s, KT+, 76s, 22-55, top 15%") or a style (nit, tight, tag, solid, regular, lag, loose, fish, calling station, maniac, random). A range overrides a style.
-- Each street has one aggressor and a bet size; everyone who doesn't fold calls it. Preflop the amount is the raise-to total, or the big blind for a limped pot. The user calls bets they face and never folds in this model.
+- Betting is played turn by turn in real table order (preflop from UTG to the big blind, after the flop from the small blind to the button). Every player, the user included, can fold, check, call, bet or raise; the table highlights whose turn it is, and the user can also click each player's action. The table summary lists every action so far and whose turn it is.
+- To describe a street quickly, use actions (who bets how much, who folds; everyone else calls in turn). It stops when the user must answer a bet. Use moves for exact turn-by-turn actions, e.g. the user calling ({seat: 0, action: 'call'}) or a specific player check-raising.
+- A street's board can only be shown once its betting is finished; show_street finishes open betting by having everyone still to act check or call.
 - Cards you don't fix are dealt at random by the app. Board cards you set become the real board.
 
 What to do

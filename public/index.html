@@ -151,6 +151,50 @@
   .gauge span:nth-child(3) { background: color-mix(in srgb, var(--good) 75%, transparent); border-radius: 0 6px 6px 0; }
   .gauge i { position: absolute; top: -5px; bottom: -5px; width: 4px; margin-left: -2px; border-radius: 2px; background: var(--fg); box-shadow: 0 0 0 2px var(--panel); transition: left .25s ease; }
   .adv-why { font-size: .8rem; }
+
+  /* Chips in front of the players */
+  .bets { position: absolute; inset: 0; pointer-events: none; }
+  .chipbet { position: absolute; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 4px; border-radius: 12px; background: rgba(0,0,0,.42); color: #fff; font: 600 .76rem var(--mono); white-space: nowrap; transition: left .38s cubic-bezier(.2,.8,.2,1), top .38s cubic-bezier(.2,.8,.2,1), opacity .38s; z-index: 2; }
+  .chipbet.sweep { opacity: 0; transition-duration: .42s; }
+  .chipbet.bump { animation: bump .32s ease-out; }
+  @keyframes bump { 40% { transform: translate(-50%, -50%) scale(1.18); } }
+  .chips-stack { position: relative; width: 16px; height: 18px; }
+  .chips-stack i { position: absolute; left: 0; bottom: calc(var(--k) * 3px); width: 16px; height: 6px; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #f6d06b 0 30%, #d9a33a 31% 60%, #fff 61% 66%, #c98b20 67%); box-shadow: 0 1px 0 rgba(0,0,0,.45); }
+  .chips-stack i:nth-child(2) { filter: hue-rotate(-40deg) saturate(1.3); } .chips-stack i:nth-child(3) { filter: hue-rotate(160deg); } .chips-stack i:nth-child(4) { filter: grayscale(1) brightness(1.4); }
+  .pot small { font: 500 .72rem var(--mono); opacity: .75; }
+  /* Whose turn */
+  .seat.turn .av { border-color: var(--glow); box-shadow: 0 0 0 3px rgba(255,211,106,.55), 0 0 18px 4px rgba(255,211,106,.45); animation: turnpulse 1.4s ease-in-out infinite; }
+  .seat.turn .nm { background: var(--glow); color: #3a2a00; }
+  @keyframes turnpulse { 50% { box-shadow: 0 0 0 5px rgba(255,211,106,.25), 0 0 26px 8px rgba(255,211,106,.25); } }
+  .hero.turn .cards { filter: drop-shadow(0 0 12px rgba(255,211,106,.65)); }
+  .hero.turn .act.you { background: var(--glow); color: #3a2a00; }
+  .act.toact { background: var(--glow); color: #3a2a00; }
+  .act.blind { background: rgba(0,0,0,.35); color: #d8e4dc; }
+  .act.empty { visibility: hidden; }
+  .card.dim { opacity: .4; }
+  /* Action bar */
+  .actbar { position: absolute; z-index: 5; transform: translate(-50%, 0); display: grid; gap: 5px; padding: 7px 8px 8px; border-radius: 10px; background: color-mix(in srgb, var(--panel) 94%, transparent); border: 1px solid var(--line); box-shadow: 0 10px 28px rgba(0,0,0,.35); min-width: 230px; }
+  .actbar[hidden] { display: none; }
+  .actbar[data-side="below"] { margin-top: 84px; }
+  .actbar[data-side="above"] { transform: translate(-50%, -100%); margin-top: -84px; }
+  .actbar[data-side="hero"] { top: auto; bottom: 2%; transform: none; margin-left: 150px; }
+  .actbar[data-side="left"] { transform: translate(-100%, -50%); margin-left: -64px; }
+  .actbar[data-side="right"] { transform: translate(0, -50%); margin-left: 64px; }
+  .actbar.you { border-color: var(--glow); box-shadow: 0 0 0 2px rgba(255,211,106,.35), 0 10px 28px rgba(0,0,0,.35); }
+  .ab-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; font: 600 .68rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .ab-tip { color: var(--warn); }
+  .ab-auto { border: 0; background: none; padding: 0 2px; font: 600 .68rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  .ab-row { display: flex; gap: 5px; }
+  .ab { flex: 1; display: grid; justify-items: center; gap: 1px; padding: 5px 8px; border-radius: 7px; font: 600 .78rem var(--body); line-height: 1.1; white-space: nowrap; transition: transform .1s, background .15s; }
+  .ab b { font: 600 .7rem var(--mono); opacity: .85; }
+  .ab:hover { transform: translateY(-1px); }
+  .ab.ab-fold { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); background: transparent; }
+  .ab.ab-call { background: var(--panel); }
+  .ab.ab-small { background: color-mix(in srgb, var(--good) 22%, var(--panel)); border-color: color-mix(in srgb, var(--good) 50%, var(--line)); }
+  .ab.ab-big { background: var(--good); border-color: var(--good); color: #fff; }
+  .ab.rec { outline: 2px solid var(--glow); outline-offset: 1px; }
+  .ab.rec span::before { content: "★ "; color: var(--warn); }
+  .actbar.docked { position: static; transform: none; margin: 0; grid-column: 1 / -1; min-width: 0; box-shadow: none; }
   .spk { padding: 1px 7px; font-size: .9rem; line-height: 1.2; border-color: transparent; background: transparent; }
   .pk-act .note { margin-right: auto; }
 
@@ -264,13 +308,15 @@
       <div class="tablewrap">
         <div class="table" id="table">
           <div class="center"><div class="board" id="board"></div><div class="pot" id="pot"></div></div>
+          <div class="bets" id="bets" aria-hidden="true"></div>
+          <div class="actbar" id="actbar" hidden role="group" aria-label="Choose an action"></div>
           <div class="hero">
             <div class="cards" id="heroCards"></div>
             <div class="line"><span class="nm">You · <span id="heroPos"></span></span><span class="st" id="heroStack"></span><span class="act you" id="heroAct"></span></div>
           </div>
         </div>
       </div>
-      <div class="prog">
+      <div class="prog" id="prog">
         <div class="steps" id="steps"></div>
         <div class="ctl">
           <span class="hint" id="hint"></span>
@@ -395,7 +441,7 @@
     if (!res.ok) { console.warn(res.error); return res; }
     loadScenario(scenario); return res;
   }
-  function newHand() { pushUndo(); lastReply = null; SC.apply(scenario, 'new_hand', { keep_ranges: true }); loadScenario(scenario, { prev: null }); }
+  function newHand() { autoRun++; pushUndo(); lastReply = null; SC.apply(scenario, 'new_hand', { keep_ranges: true }); loadScenario(scenario, { prev: null }); }
 
   const board = () => hand.board.slice(0, BOARD_N[step]);
   const liveSeats = s => hand.m.liveAfter[Math.min(s, 3)].filter(x => x > 0);
@@ -433,7 +479,7 @@
   }
   function compute(kind, args, g) { return new Promise(resolve => { queue.push({ kind, args, g, resolve }); pump(); }); }
   let renderQueued = false;
-  const scheduleRender = () => { if (renderQueued) return; renderQueued = true; requestAnimationFrame(() => { renderQueued = false; if (hand) renderPane(); }); };
+  const scheduleRender = () => { if (renderQueued) return; renderQueued = true; requestAnimationFrame(() => { renderQueued = false; if (hand) { renderPane(); if (isLive() && hand.m.next === 0) renderActionBar(); } }); };
   // A quick pass (a couple of thousand deals, ~10× faster) shows numbers right away; the full pass then refines them.
   function job(key, kind, args, quickArgs) {
     const c = cache[key];
@@ -455,56 +501,183 @@
   // ----- table -----
   const narrow = window.matchMedia('(max-width: 860px)');
   narrow.addEventListener('change', () => hand && renderTable());
+  // Where each seat sits on the oval (percent of the table box). Seat 0 (you) is bottom centre.
+  function seatPos(seat) {
+    if (seat === 0) return { x: 50, y: 92 };
+    const n = hand.n, i = seat - 1;
+    const a = (narrow.matches ? 90 + 62 + (i + 0.5) * (360 - 124) / n : 90 + (i + 1) * 360 / (n + 1)) * Math.PI / 180; // phones keep the bottom of the rail clear for your cards
+    return { x: 50 + (narrow.matches ? 40 : 47) * Math.cos(a), y: 50 + 46 * Math.sin(a) };
+  }
+  // Where a seat's chips sit: between the player and the middle of the table.
+  function betPos(seat) {
+    if (seat === 0) return { x: 50, y: 66 };
+    const p = seatPos(seat), k = narrow.matches ? 0.5 : 0.42;
+    return { x: p.x + (50 - p.x) * k, y: p.y + (46 - p.y) * k };
+  }
+  const heroOut = () => hand.m.foldedAt[0] !== null; // once you fold, the hand is over for you
+  const isLive = () => hand.m.frontier === step && step < 4 && !hand.m.ended && !heroOut() && hand.m.next !== null;
+  // A seat's latest action on street s, for the label under the player.
   function seatAction(seat, s) {
-    const m = hand.m, st = scenario.streets[s], f = m.foldedAt[seat];
+    const m = hand.m, f = m.foldedAt[seat], snap = m.street[Math.min(s, 3)];
     if (f !== null && f < s) return { text: 'Folded', cls: 'fold' };
-    if (f === s) return { text: 'Folds', cls: 'fold' };
-    if (st.aggressor === seat) return { text: s === 0 ? `Raises to ${money(m.level[0])}` : `Bets ${money(m.level[s])}`, cls: 'bet' };
-    if (s === 0 && st.aggressor === null) return { text: hand.pos[seat] === 'BB' ? 'Checks' : `Calls ${money(m.level[0])}`, cls: '' };
-    if (m.level[s] === 0) return { text: 'Checks', cls: '' };
-    return { text: `Calls ${money(m.level[s])}`, cls: '' };
+    const acts = snap ? snap.actions.filter(x => x.seat === seat) : [];
+    const last = acts[acts.length - 1];
+    if (last) return { text: last.text, cls: last.type === 'fold' ? 'fold' : last.type === 'bet' || last.type === 'raise' || last.allIn ? 'bet' : '' };
+    if (s === 0 && snap && snap.contrib[seat] > 0) return { text: `${hand.pos[seat]} ${money(snap.contrib[seat])}`, cls: 'blind' };
+    return { text: '', cls: 'empty' };
   }
   function renderTable() {
-    const h = hand, n = h.n, nb = BOARD_N[step], bd = board(), m = h.m, s3 = Math.min(step, 3);
+    const h = hand, nb = BOARD_N[step], bd = board(), m = h.m, s3 = Math.min(step, 3), snap = m.street[s3];
     const bEl = $('board'); bEl.innerHTML = ''; const g = glowSet(h.hero, bd);
     h.board.slice(0, nb).forEach(c => bEl.appendChild(cardEl(c, g.has(c) ? 'glow' : ''))); for (let i = nb; i < 5; i++) { const s = document.createElement('div'); s.className = 'slot'; bEl.appendChild(s); }
-    const w = step === 4 ? winners() : [];
-    $('pot').textContent = money(step === 4 ? m.potFinal : m.potShow[step]) + (step === 4 ? (w.includes(0) ? (w.length > 1 ? ' · split' : ' · yours') : ` → ${h.names[w[0] - 1]}`) : '');
-    $('pot').classList.toggle('win', step === 4 && w.includes(0));
-    const heroBehind = scenario.hero.stack - (step === 0 ? SC.blindOf(scenario, 0) : step === 4 ? m.contribAt[3][0] : m.contribAt[step - 1][0]);
-    $('heroStack').textContent = money(heroBehind);
+    const over = step === 4 || (m.ended && step >= m.ended.street) || (heroOut() && step >= m.foldedAt[0]);
+    const w = step === 4 ? winners() : m.ended ? [m.ended.winner] : heroOut() ? [-1] : [];
+    // the pot shows everything in, including this street's bets (which also sit in front of the players)
+    const total = over ? m.potFinal : snap ? snap.pot : m.potFinal;
+    $('pot').innerHTML = `${money(total)}${over && w[0] !== -1 ? (w.includes(0) ? (w.length > 1 ? ' · split' : ' · yours') : ` → ${esc(h.names[w[0] - 1])}`) : ''}`;
+    $('pot').classList.toggle('win', over && w.includes(0));
+    const behind = seat => (seat === 0 ? scenario.hero.stack : scenario.opponents[seat - 1].stack) - m.contribAt[s3][seat];
+    $('heroStack').textContent = money(behind(0));
     $('heroPos').textContent = h.pos[0];
-    const hc = $('heroCards'); hc.innerHTML = ''; h.hero.forEach(c => hc.appendChild(cardEl(c, 'lg' + (g.has(c) ? ' glow' : ''))));
-    const st = scenario.streets[s3];
-    $('heroAct').textContent = step === 4 ? (w.includes(0) ? (w.length > 1 ? 'Split pot' : 'You win') : 'Showdown')
-      : st.aggressor === 0 ? (step === 0 ? `You raise to ${money(m.level[0])}` : `You bet ${money(m.level[step])}`)
-      : m.toCall[step] > 0 ? `${money(m.toCall[step])} to call · your action` : step === 0 ? 'Check · your action' : 'Checked to you';
+    const hc = $('heroCards'); hc.innerHTML = ''; h.hero.forEach(c => hc.appendChild(cardEl(c, 'lg' + (g.has(c) ? ' glow' : '') + (m.foldedAt[0] !== null && m.foldedAt[0] <= s3 ? ' dim' : ''))));
+    const live = isLive(), turn = live ? m.next : null;
+    const heroLast = seatAction(0, step);
+    $('heroAct').textContent = over ? (m.foldedAt[0] !== null ? 'You folded' : w.includes(0) ? (w.length > 1 ? 'Split pot' : 'You win') : step === 4 ? 'Showdown' : 'Hand over')
+      : turn === 0 ? (m.toCall[step] > 0 ? `Your turn · ${money(m.toCall[step])} to call` : 'Your turn') : heroLast.text || (live ? 'Waiting' : '');
+    document.querySelector('.hero').classList.toggle('turn', turn === 0);
     document.querySelectorAll('.seat').forEach(e => e.remove());
     const tb = $('table');
     scenario.opponents.forEach((o, i) => {
-      const seat = i + 1, folded = m.foldedAt[seat] !== null && m.foldedAt[seat] <= s3;
-      const a = (narrow.matches ? 90 + 62 + (i + 0.5) * (360 - 124) / n : 90 + (i + 1) * 360 / (n + 1)) * Math.PI / 180; // phones keep the bottom of the rail clear for your cards
-      const s = document.createElement('div'); s.className = 'seat' + (step === 4 && w.includes(seat) ? ' win' : '') + (folded ? ' folded' : '');
-      const rx = narrow.matches ? 40 : 47;
-      s.style.left = (50 + rx * Math.cos(a)) + '%'; s.style.top = (50 + 46 * Math.sin(a)) + '%';
+      const seat = i + 1, folded = m.foldedAt[seat] !== null && m.foldedAt[seat] <= s3, p = seatPos(seat);
+      const s = document.createElement('div'); s.className = 'seat' + (over && w.includes(seat) ? ' win' : '') + (folded ? ' folded' : '') + (turn === seat ? ' turn' : '');
+      s.style.left = p.x + '%'; s.style.top = p.y + '%'; s.dataset.seat = seat;
       const cs = document.createElement('div'); cs.className = 'cards';
       if ((step === 4 && !folded) || o.cards) h.opps[i].forEach(c => cs.appendChild(cardEl(c, 'sm' + (o.cards ? ' known' : ''))));
-      else for (let k = 0; k < 2; k++) { const b = document.createElement('div'); b.className = 'card sm back'; cs.appendChild(b); }
+      else if (!folded) for (let k = 0; k < 2; k++) { const b = document.createElement('div'); b.className = 'card sm back'; cs.appendChild(b); }
       s.appendChild(cs);
       const av = document.createElement('div'); av.className = 'av'; av.textContent = h.pos[seat]; av.title = SC.POS_NAMES[h.pos[seat]] || ''; s.appendChild(av);
       const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = o.name; s.appendChild(nm);
-      const rg = SC.effRange(o);
-      if (rg || o.note) { const r = document.createElement('div'); r.className = 'rg'; r.textContent = o.range || cap(o.style || '') || ''; r.title = `${SC.rangeLabel(o)}${o.note ? ' — ' + o.note : ''}`; if (r.textContent) s.appendChild(r); }
-      const stEl = document.createElement('div'); stEl.className = 'st'; stEl.textContent = money(o.stack - m.contribAt[s3][seat]); s.appendChild(stEl);
+      if (SC.effRange(o) || o.note) { const r = document.createElement('div'); r.className = 'rg'; r.textContent = o.range || cap(o.style || '') || ''; r.title = `${SC.rangeLabel(o)}${o.note ? ' — ' + o.note : ''}`; if (r.textContent) s.appendChild(r); }
+      const stEl = document.createElement('div'); stEl.className = 'st'; stEl.textContent = money(behind(seat)); s.appendChild(stEl);
       const act = document.createElement('div');
       if (step === 4) { act.className = 'act' + (folded ? ' fold' : ''); act.textContent = folded ? 'Folded' : describe(h.opps[i], h.board).short; }
+      else if (turn === seat) { act.className = 'act toact'; act.textContent = 'To act'; }
       else { const x = seatAction(seat, step); act.className = 'act ' + x.cls; act.textContent = x.text; }
       s.appendChild(act);
       tb.appendChild(s);
     });
-    $('steps').innerHTML = STEP.map((s, i) => `<button data-step="${i}" class="${i === step ? 'on' : i < step ? 'done' : ''}"><i></i>${s}</button>` + (i < 4 ? `<span class="seg ${i < step ? 'done' : ''}"></span>` : '')).join('');
-    $('nextBtn').textContent = NEXT[step]; $('backBtn').disabled = step === 0;
-    $('hint').textContent = step === 4 ? 'Hand over.' : nb < 5 ? `${5 - nb} card${nb === 4 ? '' : 's'} to come` : 'All cards out';
+    renderBets(over ? null : snap);
+    renderActionBar();
+    $('steps').innerHTML = STEP.map((s, i) => `<button data-step="${i}" class="${i === step ? 'on' : i < step ? 'done' : ''}" ${i > SC.viewLimit(scenario) && !(i === step + 1 && !m.ended) ? 'disabled' : ''}><i></i>${s}</button>` + (i < 4 ? `<span class="seg ${i < step ? 'done' : ''}"></span>` : '')).join('');
+    const ended = (m.ended && step >= m.ended.street) || (heroOut() && step >= m.foldedAt[0]);
+    $('nextBtn').textContent = step === 4 || ended ? 'Deal a new hand' : live ? (m.next === 0 ? `Check/call to the ${STEP[step + 1].toLowerCase()}` : `Play to the ${STEP[step + 1].toLowerCase()}`) : NEXT[step];
+    $('backBtn').disabled = step === 0;
+    $('hint').textContent = ended ? (m.ended && m.ended.winner === 0 ? 'Everyone folded. You win.' : m.foldedAt[0] !== null ? 'You folded.' : 'Hand over.') : step === 4 ? 'Hand over.' : live ? `${m.next === 0 ? 'Your' : esc(h.names[m.next - 1]) + "'s"} turn` : nb < 5 ? `${5 - nb} card${nb === 4 ? '' : 's'} to come` : 'All cards out';
+  }
+
+  // ----- chips in front of the players -----
+  // Persistent elements per seat so a new bet slides in from the player, and street changes sweep chips into the pot.
+  const betEls = new Map(); let betStreet = null;
+  function chipStack(amount) {
+    const n = Math.min(4, 1 + Math.floor(Math.log2(Math.max(1, amount / scenario.bigBlind))));
+    return `<span class="chips-stack">${Array.from({ length: n }, (_, i) => `<i style="--k:${i}"></i>`).join('')}</span>`;
+  }
+  function renderBets(snap) {
+    const layer = $('bets');
+    const key = snap ? `${hand.deal}:${step}` : null;
+    if (key !== betStreet) {
+      // street changed: forward = chips sweep into the pot, otherwise just clear
+      const forward = betStreet && key && betStreet.split(':')[0] === key.split(':')[0] && +key.split(':')[1] > +betStreet.split(':')[1];
+      betEls.forEach(el => {
+        if (forward || !key) { el.classList.add('sweep'); el.style.left = '50%'; el.style.top = '56%'; setTimeout(() => el.remove(), 450); }
+        else el.remove();
+      });
+      betEls.clear(); betStreet = key;
+    }
+    if (!snap) return;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    snap.contrib.forEach((amt, seat) => {
+      let el = betEls.get(seat);
+      if (amt <= 0) { if (el) { el.remove(); betEls.delete(seat); } return; }
+      const to = betPos(seat);
+      if (!el) {
+        el = document.createElement('div'); el.className = 'chipbet';
+        const from = seatPos(seat);
+        el.style.left = from.x + '%'; el.style.top = from.y + '%';
+        layer.appendChild(el); betEls.set(seat, el);
+        if (!reduce) void el.offsetWidth; // start at the player, then glide to the felt
+      } else if (+el.dataset.amt !== amt) { el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); }
+      el.dataset.amt = amt;
+      el.innerHTML = `${chipStack(amt)}<b>${money(amt)}</b>`;
+      el.style.left = to.x + '%'; el.style.top = to.y + '%';
+    });
+  }
+
+  // ----- the action bar beside the player whose turn it is -----
+  // Four choices: Check/Call · Bet ½ pot / Raise · Bet pot / Big raise · Fold.
+  let autoRun = 0;
+  function renderActionBar() {
+    const bar = $('actbar');
+    if (!isLive()) { bar.hidden = true; return; }
+    const seat = hand.m.next, ch = SC.choices(scenario), you = seat === 0;
+    const rec = you ? heroRec() : null;
+    const pick = rec ? ({ fold: 'fold', check: 'call', call: 'call', bet: 'small', raise: 'small' }[rec.action] || null) : null;
+    const recKey = rec && (rec.action === 'bet' || rec.action === 'raise') && rec.size && Math.abs(rec.size - ch.big.to) < Math.abs(rec.size - ch.small.to) ? 'big' : pick;
+    const btn = (key, label, amt, cls, title) => `<button type="button" class="ab ab-${cls}${recKey === key ? ' rec' : ''}" data-act="${key}" title="${esc(title)}"><span>${label}</span>${amt !== null ? `<b>${money(amt)}</b>` : ''}</button>`;
+    const bet = ch.kind === 'bet';
+    const parts = [
+      btn('fold', 'Fold', null, 'fold', ch.canCheck ? 'Fold (you could check for free)' : 'Give up the hand'),
+      btn('call', ch.canCheck ? 'Check' : ch.callAllIn ? 'All-in' : 'Call', ch.canCheck ? null : ch.owe, 'call', ch.canCheck ? 'Pass without betting' : 'Match the bet'),
+    ];
+    if (ch.canRaise) {
+      parts.push(btn('small', ch.small.allIn ? 'All-in' : bet ? 'Bet ½' : 'Raise', ch.small.to, 'small', bet ? 'A light bet: about half the pot' : 'A light raise: about 2½ times the bet'));
+      if (!ch.big.same && !ch.small.allIn) parts.push(btn('big', ch.big.allIn ? 'All-in' : bet ? 'Bet pot' : 'Big raise', ch.big.to, 'big', bet ? 'A heavy bet: the size of the pot' : 'A heavy raise: the size of the pot'));
+    }
+    const who = you ? 'Your turn' : `${esc(scenario.opponents[seat - 1].name)} · ${hand.pos[seat]}`;
+    bar.innerHTML = `<div class="ab-head"><span>${who}</span>${you ? (rec ? '<span class="ab-tip">★ suggested</span>' : '') : '<button type="button" class="ab-auto" data-auto title="Let the opponents play until it is your turn">Auto ▸</button>'}</div><div class="ab-row">${parts.join('')}</div>`;
+    bar.hidden = false;
+    bar.classList.toggle('you', you);
+    const host = narrow.matches ? $('prog') : $('table');
+    if (bar.parentElement !== host) host.insertBefore(bar, host.firstChild);
+    if (narrow.matches) { bar.classList.add('docked'); bar.style.left = bar.style.top = ''; delete bar.dataset.side; return; }
+    bar.classList.remove('docked');
+    const p = seatPos(seat);
+    if (you) { bar.style.left = '50%'; bar.style.top = ''; bar.dataset.side = 'hero'; return; }
+    // side seats open toward the middle of the table; top and bottom seats open below or above
+    bar.style.left = (p.x > 72 || p.x < 28 ? p.x : Math.max(20, Math.min(80, p.x))) + '%';
+    bar.style.top = p.y + '%';
+    bar.dataset.side = p.x > 72 ? 'left' : p.x < 28 ? 'right' : p.y < 50 ? 'below' : 'above';
+  }
+  function heroRec() {
+    const S = sim(step); if (!S) return null;
+    try { return SC.recommendation(scenario, step, hand.hero, board(), S); } catch (e) { return null; }
+  }
+  function act(action, opts = {}) {
+    const res = SC.apply(scenario, 'act', { action });
+    if (!res.ok) { console.warn(res.error); return false; }
+    loadScenario(scenario); return true;
+  }
+  $('actbar').addEventListener('click', e => {
+    if (e.target.closest('[data-auto]')) { autoPlay({ stopAtHero: true }); return; }
+    const b = e.target.closest('[data-act]'); if (!b) return;
+    autoRun++; pushUndo(); act(b.dataset.act);
+  });
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  // Plays opponents with the simple computer player (and, when finishing a street, you check/call) — one action at a time
+  // so the chips animate. Any click on the table cancels it.
+  async function autoPlay({ stopAtHero = true, finishStreet = false } = {}) {
+    const run = ++autoRun, start = hand.m.frontier;
+    pushUndo();
+    while (run === autoRun) {
+      const m = hand.m;
+      if (m.ended || m.frontier !== start || m.next === null || step !== start) break;
+      const seat = m.next;
+      if (seat === 0 && stopAtHero && !finishStreet) break;
+      const a = seat === 0 ? { action: m.toCall[start] > 0 ? 'call' : 'check' } : SC.autoAction(scenario, seat, hand.opps[seat - 1], hand.board.slice(0, BOARD_N[start]));
+      if (!act(a.action)) break;
+      await sleep(window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320);
+    }
+    return run === autoRun;
   }
   function glowSet(hero, bd) { if (bd.length < 3) return rankOf(hero[0]) === rankOf(hero[1]) ? new Set(hero) : new Set(); return E.handCards(hero, bd); }
 
@@ -849,10 +1022,18 @@
       } else html += `<p class="note">Hand over. Deal again, or use Back to revisit a street.</p>`;
       $('pane').innerHTML = html; return;
     }
+    const m = h.m;
+    if (((m.ended && step >= m.ended.street) || (heroOut() && step >= m.foldedAt[0])) && tab === 'read') {
+      const youWin = !!m.ended && m.ended.winner === 0, youFolded = m.foldedAt[0] !== null;
+      html += `<div class="big">${youWin ? 'Won' : youFolded ? 'Folded' : 'Over'}<small>${youWin ? `Everyone else folded. You take ${money(m.potFinal)}.` : youFolded ? `You folded on the ${STEP[m.foldedAt[0]].toLowerCase()} with ${money(m.contrib[0])} in the pot.` : `${esc(h.names[m.ended.winner - 1])} takes ${money(m.potFinal)}.`}</small></div>`;
+      html += '<p class="note">Deal a new hand, or Undo to take the last action back.</p>';
+      $('pane').innerHTML = html; return;
+    }
     if (needGuess()) { $('pane').innerHTML = topBlock(null, 0) + guessHist(); $('guessBtn').addEventListener('click', revealGuess); $('guessIn').addEventListener('keydown', e => { if (e.key === 'Enter') revealGuess(); }); $('guessIn').focus(); sim(step); return; }
     const S = sim(step), chance = S ? S.chance : null;
     if (tab === 'read') {
-      html += S ? adviceBlock(S) : blk('What you should do', '<p class="note calc">Reading the spot…</p>');
+      if (step !== m.frontier) html += blk('What you should do', `<p class="note">Betting on the ${STEP[step].toLowerCase()} is finished. Go to the ${STEP[Math.min(m.frontier, 4)].toLowerCase()} for advice on your next decision.</p>`);
+      else html += S ? adviceBlock(S) : blk('What you should do', '<p class="note calc">Reading the spot…</p>');
       html += topBlock(S, chance);
       const vs = vsLabel(step), live = liveSeats(step).length;
       if (!S) html += blk('Working', '<p class="note calc">Running the numbers…</p>');
@@ -870,12 +1051,12 @@
       if (anyRanges(step)) html += blk('Opponents', rangeList(step));
       html += guessHist();
     } else if (tab === 'bets') {
-      const m = h.m, s = step, st = scenario.streets[s];
-      const pot = m.potStart[s] || m.potShow[0], facing = st.aggressor !== null && st.aggressor !== 0 && s > 0 ? m.level[s] : null;
-      const sizes = [[0.5, 'Half pot'], [1, 'Pot'], [2, 'Double pot']].map(([f, l]) => [Math.round(pot * f), l]);
-      if (facing) sizes.unshift([facing, `${scenario.opponents[st.aggressor - 1].name}'s bet`]);
-      const have = chance === null ? null : chance;
-      html += blk(`If someone bets into ${money(pot)}`, `<table><tr><th>Bet</th><th>You call</th><th>Need</th><th>You have</th></tr>${sizes.map(([b, l], i) => { const need = b / (pot + 2 * b) * 100; return `<tr class="${facing && i === 0 ? 'live' : ''}"><td><span class="n">${money(b)}</span><br><span class="note">${esc(l)}</span></td><td class="n">${money(b)} → ${money(pot + b)}</td><td class="n">${pct(need)}</td><td class="n" style="color:var(--${have === null ? 'muted' : need < have ? 'good' : 'bad'})">${have === null ? '…' : pct(have)}</td></tr>`; }).join('')}</table><p class="note">Need = your call ÷ pot after calling. Call when "you have" beats "need" <span class="term">(pot odds)</span>.${step < 3 ? ' Rough with cards to come.' : ''}</p>`);
+      const snap = m.street[Math.min(step, 3)], owe = m.toCall[Math.min(step, 3)];
+      const pot = snap ? snap.pot : m.potFinal, have = chance;
+      const rows = [];
+      if (owe > 0) rows.push({ b: owe, label: `Calling ${snap.lastAgg ? esc(h.names[snap.lastAgg - 1]) + "'s bet" : 'the bet'}`, need: owe / (pot + owe) * 100, live: true, after: pot + owe });
+      [[0.5, 'Half pot'], [1, 'Pot'], [2, 'Double pot']].forEach(([f, l]) => { const b = Math.round(pot * f); rows.push({ b, label: `If someone bets ${l.toLowerCase()}`, need: b / (pot + 2 * b) * 100, after: pot + 2 * b }); });
+      html += blk(`Pot odds <small>pot ${money(pot)}</small>`, `<table><tr><th>Bet</th><th>Pot after call</th><th>Need</th><th>You have</th></tr>${rows.map(r => `<tr class="${r.live ? 'live' : ''}"><td><span class="n">${money(r.b)}</span><br><span class="note">${r.label}</span></td><td class="n">${money(r.after)}</td><td class="n">${pct(r.need)}</td><td class="n" style="color:var(--${have === null ? 'muted' : r.need < have ? 'good' : 'bad'})">${have === null ? '…' : pct(have)}</td></tr>`).join('')}</table><p class="note">Need = your call ÷ pot after calling. Call when "you have" beats "need" <span class="term">(pot odds)</span>.${step < 3 ? ' Rough with cards to come.' : ''}</p>`);
     }
     $('pane').innerHTML = html;
   }
@@ -883,12 +1064,19 @@
   function guessHist() { const g = guesses.slice(-20); return g.length ? `<p class="note">Guess record: off by ${Math.round(g.reduce((s, x) => s + Math.abs(x), 0) / g.length)} on average, last ${g.length}.</p>` : ''; }
   function revealGuess() { const v = parseFloat($('guessIn').value); guessed[step] = isNaN(v) ? null : v; renderPane(); }
   function renderAll() { renderTable(); renderPane(); }
-  const go = s => { step = Math.max(0, Math.min(4, s)); commitRevealed(); renderAll(); };
+  const go = s => { autoRun++; step = Math.max(0, Math.min(SC.viewLimit(scenario), s)); commitRevealed(); renderAll(); };
+  // Next: reveal the next street; if betting on this street is still open, play it out first (opponents auto, you check/call).
+  async function next() {
+    const m = hand.m;
+    if (step === 4 || (m.ended && step >= m.ended.street) || (heroOut() && step >= m.foldedAt[0])) { newHand(); return; }
+    if (isLive()) { await autoPlay({ finishStreet: true }); if (hand.m.ended) { renderAll(); return; } }
+    if (step < SC.viewLimit(scenario)) go(step + 1);
+  }
 
   $('dealBtn').addEventListener('click', newHand);
-  $('nextBtn').addEventListener('click', () => { if (step === 4) newHand(); else go(step + 1); });
+  $('nextBtn').addEventListener('click', next);
   $('backBtn').addEventListener('click', () => go(step - 1));
-  $('steps').addEventListener('click', e => { const b = e.target.closest('[data-step]'); if (b) go(+b.dataset.step); });
+  $('steps').addEventListener('click', e => { const b = e.target.closest('[data-step]'); if (!b) return; if (+b.dataset.step === step + 1 && isLive()) next(); else go(+b.dataset.step); });
   $('nOpp').addEventListener('change', () => edit('setup_table', { opponents: +$('nOpp').value }));
   $('guessFirst').addEventListener('change', renderPane);
   $('showTerms').addEventListener('change', () => document.body.classList.toggle('terms', $('showTerms').checked));
