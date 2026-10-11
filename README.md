@@ -10,7 +10,7 @@ A Texas Hold'em trainer. Set up any spot by talking to the coach, picking cards,
                                      └──── numbers from the engine ◄─────┘
 ```
 
-- **Scenario** (`public/scenario.js`): one JSON record for the hand: seats, positions, stacks, your cards, the board, each opponent's known cards / range / style, and the action on every street. The table, the stats and the agent all read and write it.
+- **Scenario** (`public/scenario.js`): one JSON record for the hand: seats, positions, stacks, your cards, the board, each opponent's known cards / range / style, and every action on every street in turn order (`replay()` turns it into pots, whose turn it is and who is still in). The table, the stats and the agent all read and write it.
 - **Engine** (`public/engine.js`): exact 7-card evaluator, range parsing, and equity. Opponents are drawn from their ranges with card removal; with one opponent left on the turn or river every outcome is enumerated (exact), otherwise it simulates 6,000–14,000 deals. Runs in a Web Worker in the browser and in Node on the server.
 - **What you should do** (`recommend` in `engine.js`): a rule-of-thumb gauge at the top of the Read tab. Preflop it compares your hand's starting-hand rank with what players usually open or continue with from your position (and against the raiser's range); after the flop it weighs your win chance against the price, draws, board texture, number of opponents and their styles. Fold / Check · Call / Bet · Raise, with a size and the reasons. It is not a solver.
 - **Coach agent** (`server/agent/`): an LLM that turns what you say into one `update_table` call (every change at once; it returns fresh stats and the recommendation), plus `calculate` (another street) and `what_if` (compare without changing the table). Each message already carries the current stats, so a plain question needs no tool call. A setup is two model calls; progress streams to the page so the table updates before the written answer arrives. It never invents numbers.
@@ -44,7 +44,18 @@ The coach sets up the table (positions, ranges on the seats, folds, bets, board)
 
 Ranges use standard notation: `QQ+`, `22-55`, `AKs`, `AQo+`, `A5s-A2s`, `KT+`, `AhKh`, `top 15%`. Styles: nit, tight, tag, solid, regular, lag, loose, fish, calling station, maniac, random.
 
-The betting model is deliberately simple: each street has one bettor (or raiser) and a size; everyone who doesn't fold calls; you call what you face.
+## Playing a hand
+
+Betting is played turn by turn in real table order (preflop from under the gun to the big blind, after the flop from the small blind to the button). Whoever's turn it is glows, and a small bar beside them offers four choices:
+
+| Button | No bet yet | Facing a bet |
+|---|---|---|
+| **Check / Call** | check | call the bet (or all-in if it's more than the stack) |
+| **Bet ½ / Raise** | a light bet: half the pot | a light raise: about 2½× the bet |
+| **Bet pot / Big raise** | a heavy bet: the size of the pot | a heavy raise: pot-sized |
+| **Fold** | give up the hand | give up the hand |
+
+Chips slide in front of each player as they bet and sweep into the pot when the street ends. **Auto ▸** lets the opponents play (each plays its actual cards with its style) until it's your turn; **Play to the flop/turn/river** finishes the betting round (you check/call) and deals the next card. On your turn the button the "What you should do" gauge recommends is starred. Folding ends the hand for you; Undo takes back any action. The stats, the gauge and the coach all use the actual action: who is still in, the pot, what you have to call, who raised and who called.
 
 ## Voice
 

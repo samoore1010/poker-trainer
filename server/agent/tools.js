@@ -31,10 +31,16 @@ const ACTION = { type: 'object', additionalProperties: false, required: ['street
   folds: { type: 'array', items: SEAT, description: 'Opponents who fold on this street (replaces the list).' },
 } };
 
+const MOVE = { type: 'object', additionalProperties: false, required: ['action'], properties: {
+  seat: SEAT,
+  action: { type: 'string', enum: ['fold', 'check', 'call', 'bet', 'raise', 'allin', 'small', 'big'], description: 'small/big = the app\'s light (½ pot, or 2.5× raise) and heavy (pot) sizes.' },
+  amount: { type: 'number', description: 'For bet/raise: the total the player puts in on this street.' },
+} };
+
 const DEFS = [
   {
     name: 'update_table',
-    description: 'Make ALL changes to the table in this one call, then it returns the fresh stats and the app\'s recommendation. Fields are applied in this order: new_table (fresh scenario) or new_hand, table, hero_cards, opponents, board, actions, show_street. Leave out anything that should stay as it is.',
+    description: 'Make ALL changes to the table in this one call, then it returns the fresh stats and the app\'s recommendation. Fields are applied in this order: new_table (fresh scenario) or new_hand, table, hero_cards, opponents, board, actions, moves, show_street. Leave out anything that should stay as it is.',
     parameters: { type: 'object', additionalProperties: false, properties: {
       new_table: { ...TABLE, description: 'Start a brand-new scenario (clears cards, ranges and action) with these settings.' },
       new_hand: { type: 'object', additionalProperties: false, properties: { keep_ranges: { type: 'boolean' } }, description: 'Deal a fresh random hand at the same table.' },
@@ -42,7 +48,8 @@ const DEFS = [
       hero_cards: CARDS('The user\'s 2 hole cards, or [] for random.'),
       opponents: { type: 'array', items: OPPONENT, description: 'Changes to individual opponents.' },
       board: CARDS('Community cards in deal order: 0, 3 (flop), 4 (turn) or 5 (river). The table moves to that street.'),
-      actions: { type: 'array', items: ACTION, description: 'Betting per street, earliest street first.' },
+      actions: { type: 'array', items: ACTION, description: 'Script a street: who bets (and how much) and who folds; everyone else calls in turn order. It stops at the user\'s decision when they face a bet; the rest of the street plays out after the user acts.' },
+      moves: { type: 'array', items: MOVE, description: 'Exact actions in turn order on the street being played, starting with whoever is to act now (including the user, seat 0). Applied after actions.' },
       show_street: { type: 'string', enum: ['preflop', 'flop', 'turn', 'river', 'showdown'], description: 'Street to show at the end.' },
     } },
   },
@@ -128,6 +135,7 @@ function updateTable(state, a) {
   for (const o of a.opponents || []) run('set_opponent', o);
   if (a.board) run('set_board', { cards: a.board });
   for (const act of (a.actions || []).slice().sort((x, y) => S.STREETS.indexOf(x.street) - S.STREETS.indexOf(y.street))) run('set_action', act);
+  for (const mv of a.moves || []) run('act', mv);
   if (a.show_street) run('show_street', { street: a.show_street });
   state.changes.push(...done);
   if (done.length && state.emit) state.emit({ type: 'scenario', scenario: sc, changes: state.changes.slice() });
