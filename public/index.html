@@ -702,7 +702,7 @@
       pushUndo();
       lastReply = { text: res.reply || 'Done.', changes: res.changes || [] };
       coachLog.push({ role: 'assistant', text: lastReply.text, changes: lastReply.changes });
-      $('askIn').value = ''; coachNote('');
+      $('askIn').value = ''; coachNote(tab === 'coach' ? '' : 'Done. The coach’s reply is in the Coach tab.');
       loadScenario(res.scenario);
     } catch (e) {
       coachLog.pop();
@@ -721,11 +721,6 @@
     const text = await recordAndTranscribe($('askMic'), $('askMeter'), coachNote, 'describe a spot or ask a question.');
     if (text) { $('askIn').value = text; coachNote(''); askAgent(text); }
   });
-  function coachBlock() {
-    if (!lastReply) return '';
-    const chips = lastReply.changes.length ? `<div class="chips">${lastReply.changes.map(c => `<span class="chg">${esc(c)}</span>`).join('')}</div>` : '';
-    return blk('Coach <button class="more" data-tab-go="coach">History</button>', `<p class="reply">${esc(lastReply.text)}</p>${chips}`);
-  }
   function renderCoach() {
     if (!HV || !HV.api.has('agent')) return blk('Coach', `<p class="note">The coach sets up any scenario from a description and explains the numbers. It needs the app running on its server with OPENAI_API_KEY or ANTHROPIC_API_KEY set.</p>`);
     let html = '';
@@ -801,7 +796,6 @@
     if (step === 4) {
       const full = h.board, d = describe(h.hero, full), w = winners();
       if (tab === 'read') {
-        html += coachBlock();
         html += `<div class="big">${w.includes(0) ? (w.length > 1 ? 'Split' : 'Won') : 'Lost'}<small>${d.text}</small></div>`;
         html += `<h3>Chance to win, by street</h3><div class="timeline">${[0, 1, 2, 3].map(s => { const c = chanceFor(s); return `<div class="pt"><span class="k">${STEP[s]}</span><span class="v">${c === null ? '…' : pct(c)}</span></div>`; }).join('')}</div>`;
         html += `<h3>Hands</h3><ul>${scenario.opponents.map((o, i) => { const folded = h.m.foldedAt[i + 1] !== null; return `<li><b>${esc(o.name)}</b> ${folded ? '<span class="note">folded</span>' : `${miniCards(h.opps[i])} ${describe(h.opps[i], full).text}${w.includes(i + 1) ? ' ← winner' : ''}`}</li>`; }).join('')}</ul>`;
@@ -811,7 +805,6 @@
     if (needGuess()) { $('pane').innerHTML = topBlock(null, 0) + guessHist(); $('guessBtn').addEventListener('click', revealGuess); $('guessIn').addEventListener('keydown', e => { if (e.key === 'Enter') revealGuess(); }); $('guessIn').focus(); sim(step); return; }
     const S = sim(step), chance = S ? S.chance : null;
     if (tab === 'read') {
-      html += coachBlock();
       html += topBlock(S, chance);
       const vs = vsLabel(step), live = liveSeats(step).length;
       if (!S) html += blk('Working', '<p class="note calc">Running the numbers…</p>');
