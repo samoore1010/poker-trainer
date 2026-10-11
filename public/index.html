@@ -113,6 +113,10 @@
   .say input { flex: 1; min-width: 0; font: 400 .88rem var(--body); padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
   .say #micBtn { font-size: 1rem; padding: 5px 9px; } .say #micBtn.live { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   .sayNote.err { color: var(--bad); }
+  .meter { width: 46px; height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; flex: none; }
+  .meter[hidden] { display: none; }
+  .meter i { display: block; height: 100%; width: calc(var(--lvl, 0) * 100%); background: var(--good); transition: width .06s linear; }
+  .spk { padding: 1px 7px; font-size: .9rem; line-height: 1.2; border-color: transparent; background: transparent; }
   .pk-act .note { margin-right: auto; }
 
   /* Advisor */
@@ -236,10 +240,11 @@
           </div>
           <div class="say">
             <input type="text" id="sayIn" placeholder="Say or type it: ace of spades, jack of hearts, flop king of hearts ten of hearts two of hearts, turn eight of spades, river three of diamonds" aria-label="Describe the deal">
+            <span class="meter" id="micMeter" hidden aria-hidden="true"><i></i></span>
             <button id="micBtn" class="ghost" aria-label="Dictate with microphone" title="Dictate">🎙</button>
             <button id="sayBtn">Set cards</button>
           </div>
-          <p class="note" id="sayNote">Click cards to fill the slots, or describe the deal above. Your two cards are required; flop, turn and river are optional and fill in order.</p>
+          <p class="note sayNote" id="sayNote">Click cards to fill the slots, or describe the deal above. Your two cards are required; flop, turn and river are optional and fill in order.</p>
           <div class="deck" id="deck"></div>
           <div class="pk-act"><span class="note" id="pkNote"></span><button class="ghost" id="pkClear">Clear</button><button class="primary" id="pkDeal">Deal this hand</button></div>
         </div>
@@ -254,6 +259,7 @@
     </aside>
   </div>
 </div>
+<script src="voice.js"></script>
 <script>
 (function () {
   'use strict';
@@ -567,8 +573,8 @@
     sayNote(errs.length ? 'Set what I could. Skipped: ' + errs.join(', ') : `Set ${all.length} card${all.length > 1 ? 's' : ''}. Check the slots, then deal.`, errs.length > 0);
   }
   function sayNote(t, err) { const n = $('sayNote'); n.textContent = t; n.classList.toggle('err', !!err); }
-  $('sayBtn').addEventListener('click', () => applyParsed($('sayIn').value));
-  $('sayIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyParsed($('sayIn').value); } });
+  $('sayBtn').addEventListener('click', () => resolveText($('sayIn').value));
+  $('sayIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); resolveText($('sayIn').value); } });
   // Microphone: browser speech recognition (Chrome, Edge, Safari) on a secure page. Dictation keeps listening through pauses,
   // fills the slots as each phrase is recognized, and stops on a second click, Escape, closing the picker, or a few seconds of silence.
   // Where speech recognition is missing (Firefox) or blocked, OS dictation into the text box still works.
@@ -577,6 +583,7 @@
   const SILENCE_MS = 4000;
   let rec = null, micFinal = '', micErr = null, micTimer = 0;
   const micBtn = $('micBtn');
+  const NOTE0 = $('sayNote').textContent;
   if (!SR) { micBtn.hidden = true; $('sayNote').textContent += ` This browser has no built-in speech recognition (Chrome, Edge or Safari do); ${OS_DICTATION}.`; }
   else if (!window.isSecureContext) { micBtn.disabled = true; micBtn.title = 'Dictation needs an https:// page'; }
   function micUi(live) { micBtn.classList.toggle('live', live); micBtn.setAttribute('aria-pressed', live ? 'true' : 'false'); micBtn.title = live ? 'Stop dictation' : 'Dictate'; micBtn.setAttribute('aria-label', live ? 'Stop dictation' : 'Dictate with microphone'); }
@@ -598,7 +605,7 @@
     'bad-grammar': 'Speech recognition failed. Try again.',
   };
   function armSilence() { clearTimeout(micTimer); micTimer = setTimeout(() => { if (rec) rec.stop(); }, SILENCE_MS); }
-  function stopMic() { if (rec) { try { rec.stop(); } catch (e) {} } }
+  function stopMic() { if (cloudRec) cloudRec.cancel(); if (rec) { try { rec.stop(); } catch (e) {} } }
   function startMic() {
     micFinal = ''; micErr = null; $('sayIn').value = '';
     try {
@@ -628,7 +635,62 @@
     try { r.start(); sayNote('Starting the microphone… allow access if your browser asks.'); }
     catch (err) { rec = null; micUi(false); sayNote('Could not start the microphone. Try again.', true); }
   }
-  micBtn.addEventListener('click', () => { if (rec) stopMic(); else startMic(); });
+  // Server voice (preferred when the server has an OpenAI key): record here, transcribe with OpenAI, then read the cards locally,
+  // falling back to the server's card parser when the words don't map cleanly. Browser speech recognition above is the fallback.
+  const HV = window.HandVoice, meter = $('micMeter');
+  let voiceMode = SR ? 'browser' : null, cloudRec = null, voiceBusy = false;
+  if (HV) HV.api.init().then(() => {
+    if (HV.api.has('transcribe') && HV.recordingSupported()) {
+      voiceMode = 'cloud'; micBtn.hidden = false; micBtn.disabled = false; micBtn.title = 'Dictate';
+      if (!SR) sayNote(NOTE0);
+    }
+    if (hand && HV.api.has('speak')) renderPane();
+  });
+  async function cloudDictate() {
+    if (cloudRec) { cloudRec.stop(); return; }
+    if (voiceBusy) return;
+    const r = cloudRec = new HV.Recorder({ onLevel: v => meter.style.setProperty('--lvl', v.toFixed(3)), onSpeech: () => sayNote('Hearing you… pause when you\'re done, or click the mic to finish.') });
+    micUi(true); meter.hidden = false; $('sayIn').value = '';
+    sayNote('Starting the microphone… allow access if your browser asks.');
+    try {
+      await r.start();
+      sayNote(`Listening${r.device ? ` on ${r.device}` : ''}… say your cards, like "ace king of spades, flop ten nine two of clubs".`);
+      const { blob } = await r.done;
+      cloudRec = null; micUi(false); meter.hidden = true; voiceBusy = true; micBtn.disabled = true;
+      sayNote('Transcribing…');
+      const { text } = await HV.api.transcribe(blob);
+      $('sayIn').value = text;
+      if (!text) sayNote('Nothing recognizable was heard. Try again, a little closer to the mic.', true);
+      else await resolveText(text);
+    } catch (e) {
+      if (e.code !== 'cancelled') sayNote(e.message || 'Voice input failed.', true);
+    } finally {
+      if (cloudRec === r) cloudRec = null;
+      micUi(false); meter.hidden = true; voiceBusy = false; micBtn.disabled = false;
+    }
+  }
+  // Typed or transcribed text → cards. The local parser handles plain "ace of spades" speech instantly;
+  // anything it can't fully read (slang, odd phrasing, missing suits) goes to the server's AI parser when available.
+  async function resolveText(text) {
+    const { groups, errs } = parseDeal(text);
+    if (!text.trim() || (!errs.length && groups.flat().length >= 2) || !HV || !HV.api.has('parseCards')) return applyParsed(text);
+    sayNote('Working out the cards…');
+    try { if (applyDeal(await HV.api.parseCards(text))) return; }
+    catch (e) { if (e.code === 'access_code_required' || e.code === 'rate_limited') { sayNote(e.message, true); return; } }
+    applyParsed(text);
+  }
+  function applyDeal(d) {
+    const code = c => RANKS.indexOf(c[0]) * 4 + 'cdhs'.indexOf(c[1]);
+    const np = [null, null, null, null, null, null, null];
+    d.hero.forEach((c, i) => np[i] = code(c)); d.flop.forEach((c, i) => np[2 + i] = code(c));
+    if (d.turn) np[5] = code(d.turn); if (d.river) np[6] = code(d.river);
+    const n = np.filter(x => x !== null).length;
+    if (!n) { if (!d.unclear) return false; sayNote(`Couldn't pin down the cards: ${d.unclear}`, true); return true; }
+    pick = np; renderPicker();
+    sayNote(`Set ${n} card${n > 1 ? 's' : ''}. ${d.unclear ? `Not sure about: ${d.unclear}` : 'Check the slots, then deal.'}`, !!d.unclear);
+    return true;
+  }
+  micBtn.addEventListener('click', () => { if (voiceMode === 'cloud') cloudDictate(); else if (rec) stopMic(); else startMic(); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') stopMic(); });
   $('deck').addEventListener('click', e => { const b = e.target.closest('[data-card]'); if (!b) return; const c = +b.dataset.card; const at = pick.indexOf(c); if (at >= 0) { pick[at] = null; } else { const i = pick.indexOf(null); if (i < 0) return; pick[i] = c; } renderPicker(); });
   $('slots').addEventListener('click', e => { const s = e.target.closest('[data-slot]'); if (!s) return; pick[+s.dataset.slot] = null; renderPicker(); });
@@ -685,7 +747,8 @@
     const hn = step === 0 ? `${preflopShort(h.hero)}<span class="note">top ${Math.round(PCT[handLabel(h.hero[0], h.hero[1])])}% of starting hands</span>` : (d => `${cap(d.text)}${d.shared ? ` <span class="chip hot">shared</span>` : ''}`)(describe(h.hero, bd));
     if (needGuess()) return blk('Your hand', `<div class="top"><div class="l1"><span class="hn">${hn}</span><span class="guess"><input type="number" id="guessIn" min="0" max="100" inputmode="decimal" aria-label="Your guess, percent" placeholder="%"><button class="primary" id="guessBtn">Reveal</button></span></div><div class="l2"><span>Your guess: chance to win ${vs}?</span></div></div>`);
     const g = guessed[step] != null ? `<span>guess ${Math.round(guessed[step])}% · off by ${Math.round(Math.abs(guessed[step] - chance))}</span>` : '';
-    return blk('Your hand', `<div class="top"><div class="l1"><span class="hn">${hn}</span><span class="pc">${pct(chance)}</span></div><div class="l2"><span>${odds(chance)} · ${vs}</span>${g}</div></div>`);
+    const spk = HV && HV.api.has('speak') ? ' <button class="spk" data-speak aria-label="Read this hand aloud" title="Read aloud">🔊</button>' : '';
+    return blk('Your hand' + spk, `<div class="top"><div class="l1"><span class="hn">${hn}</span><span class="pc">${pct(chance)}</span></div><div class="l2"><span>${odds(chance)} · ${vs}</span>${g}</div></div>`);
   }
   function renderPane() {
     const h = hand, n = h.n, nb = BOARD_N[step], vs = `vs ${n} random hand${n > 1 ? 's' : ''}`;
@@ -736,7 +799,16 @@
   $('nOpp').addEventListener('change', () => deal());
   $('guessFirst').addEventListener('change', renderPane);
   $('showTerms').addEventListener('change', () => document.body.classList.toggle('terms', $('showTerms').checked));
-  $('pane').addEventListener('click', e => { const b = e.target.closest('[data-more]'); if (!b) return; const box = $(b.dataset.more); const open = b.dataset.open === '1'; box.querySelectorAll('.row.hid, .row.was-hid').forEach(r => { r.classList.toggle('hid', open); r.classList.add('was-hid'); }); b.dataset.open = open ? '0' : '1'; b.textContent = open ? `Show ${b.dataset.n} more` : 'Show fewer'; });
+  async function speakHand(btn) {
+    const h = hand, chance = chanceFor(step), n = h.n;
+    const name = step === 0 ? `${preflopShort(h.hero)}, top ${Math.round(PCT[handLabel(h.hero[0], h.hero[1])])} percent of starting hands` : describe(h.hero, board()).text.replace(/<[^>]+>/g, '');
+    const text = `${cap(name)}. About ${Math.round(chance)} percent to win against ${n} random hand${n > 1 ? 's' : ''}, ${odds(chance)}.`;
+    btn.disabled = true;
+    try { await HV.speak(text); }
+    catch (e) { btn.textContent = '⚠'; btn.title = e.message || 'Could not play audio'; setTimeout(() => { btn.textContent = '🔊'; btn.title = 'Read aloud'; }, 4000); }
+    finally { btn.disabled = false; }
+  }
+  $('pane').addEventListener('click', e => { const sp = e.target.closest('[data-speak]'); if (sp) { speakHand(sp); return; } const b = e.target.closest('[data-more]'); if (!b) return; const box = $(b.dataset.more); const open = b.dataset.open === '1'; box.querySelectorAll('.row.hid, .row.was-hid').forEach(r => { r.classList.toggle('hid', open); r.classList.add('was-hid'); }); b.dataset.open = open ? '0' : '1'; b.textContent = open ? `Show ${b.dataset.n} more` : 'Show fewer'; });
   document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => { tab = b.dataset.tab; document.querySelectorAll('.tabs button').forEach(x => x.setAttribute('aria-selected', x === b ? 'true' : 'false')); renderPane(); }));
   document.addEventListener('keydown', e => { if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return; if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); $('nextBtn').click(); } if (e.key === 'ArrowLeft') go(step - 1); if (e.key.toLowerCase() === 'n') deal(); });
   deal();

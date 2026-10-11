@@ -1,41 +1,87 @@
 # Hand Walkthrough Table
 
-A single-file poker hand trainer. Deal against 1–8 opponents (or set up any hand by picking, typing or saying the cards), step through flop, turn, river and showdown, and read your hand strength, improvement odds, and what beats you.
+A poker hand trainer. Deal against 1–8 opponents (or set up any hand by picking, typing or saying the cards), step through flop, turn, river and showdown, and read your hand strength, improvement odds, and what beats you.
 
-- `index.html` is the whole app (fonts load from Google Fonts). It opens directly from disk.
-- `server.js` is a dependency-free Node server for hosting it (Railway, Render, Fly, any VPS).
+Voice runs through OpenAI: your browser records you, the server sends the audio to OpenAI for transcription, and the cards are read from the text. The app can also read your hand aloud with OpenAI text-to-speech.
 
-## Voice entry
+## Deploy to Railway
 
-Open **Pick cards** and click 🎙, then talk:
+1. **New Project → Deploy from GitHub repo** → pick this repository. Railway reads `railway.json` (Railpack build, `node server/index.js`, health check on `/health`).
+2. **Variables**: add `OPENAI_API_KEY`. Everything else is optional; see `.env.example`.
+3. **Settings → Networking → Generate Domain**, then open the `https://…up.railway.app` URL.
+4. Check the key and models: in the service, open a shell (or run `railway run npm run check:openai` locally) and run `npm run check:openai`.
+
+Without `OPENAI_API_KEY` the app still runs; the mic falls back to the browser's own speech recognition (Chrome, Edge or Safari).
+
+**Cost control:** set `ACCESS_CODE` so only people you give the code to can use the voice features, and tune `RATE_LIMIT_PER_MIN` (default 30 OpenAI calls per minute per visitor).
+
+## Using voice
+
+Open **Pick cards**, click 🎙 and talk:
 
 > "ace king of spades, flop ten nine two of clubs, turn eight of diamonds, river three of hearts"
 
-- Slots fill as each phrase is recognized. Dictation keeps listening through pauses and stops when you click 🎙 again, press Escape, close the picker, or stay silent for 4 seconds.
-- A suit applies to every rank said just before it ("ten nine two of clubs" is three clubs). Common mishearings ("for", "to", "ate", "harts") are understood when a suit follows.
-- Words: `flop`, `turn` and `river` start those streets; otherwise cards fill in order (your two, flop, turn, river). Shorthand like `As Kd 7h` works when typed.
-
-Requirements, set by the browsers themselves:
-
-- **Chrome, Edge or Safari.** Firefox has no built-in speech recognition, so the mic button is hidden there. Use OS dictation (Win+H, or Fn twice on macOS) into the text box instead.
-- **HTTPS** (or `localhost`, or opening the file directly). The server redirects HTTP to HTTPS behind Railway's proxy and sends `Permissions-Policy: microphone=(self)`.
-- **Internet access.** Chrome and Edge send audio to their speech service.
-- The page must be in its own tab. Viewers that embed it in a frame (like a claude.ai artifact) block the microphone.
-
-If the browser blocks the mic, the app says why (permission denied, no microphone found, mic busy, offline) and how to fix it.
+- A level meter next to the mic shows the microphone is hearing you. Recording stops on its own after a short pause, or when you click 🎙 again. Escape cancels.
+- Plain card names are read instantly. Anything else ("pocket rockets, the black ones", "bullets in the hole") is sent to an OpenAI model that returns exact cards; it never guesses suits you didn't say.
+- If something's wrong the app says what: microphone blocked, no microphone, mic busy, mic sending silence, no speech, bad API key, out of OpenAI credit, rate limited.
+- 🔊 in the "Your hand" panel reads the hand and win chance aloud.
 
 ## Run locally
 
 ```
-npm start            # http://localhost:3000  (PORT=8080 npm start to change)
+npm start                                  # http://localhost:3000, no voice API
+OPENAI_API_KEY=sk-... npm start            # with OpenAI voice
+npm run dev                                # restarts on server changes
+npm test                                   # server tests against a fake OpenAI
 ```
 
-Or just open `index.html` in Chrome.
+Opening `public/index.html` straight from disk also works, with browser speech recognition only.
 
-## Deploy to Railway
+## Project layout
 
-1. In Railway: **New Project → Deploy from GitHub repo** and pick this repository.
-2. Railway reads `railway.json`: it builds with Railpack, runs `node server.js`, and health-checks `/health`. No environment variables are needed (`PORT` is provided by Railway).
-3. Open the service's **Settings → Networking → Generate Domain**. The `https://…up.railway.app` URL is ready to use, mic included.
+```
+public/              everything the browser loads
+  index.html         the app (table, odds engine, advisor, card picker)
+  voice.js           window.HandVoice: mic recorder + level meter + silence detection, API client, speak()
+server/
+  index.js           entry point
+  config.js          every environment variable, with defaults
+  app.js             security headers, HTTPS redirect, router, access code + rate limit, static files, JSON errors
+  openai.js          OpenAI REST client (timeouts, one retry, clear error codes): transcribe(), json(), speak()
+  rateLimit.js       per-IP limiter
+  http.js            HttpError, JSON/body helpers
+  lib/cards.js       card codes, JSON schema for a deal, validation
+  routes/            one file per feature, registered in routes/index.js
+    system.js        GET /health, GET /api/status
+    voice.js         POST /api/transcribe, POST /api/speak
+    cards.js         POST /api/cards/parse
+scripts/check-openai.js   verifies the key and that each configured model exists
+test/                node:test suite
+```
 
-Or with the CLI: `railway init && railway up`, then `railway domain`.
+## API
+
+| Route | Body | Returns |
+|---|---|---|
+| `GET /api/status` | | `{features: {transcribe, parseCards, speak}, accessCodeRequired, models, limits}` |
+| `POST /api/transcribe?context=cards\|none&lang=en` | raw audio, `Content-Type: audio/webm` (or mp4, ogg, wav, mp3) | `{text, model, ms}` |
+| `POST /api/cards/parse` | `{"text": "..."}` | `{hero: ["As","Kd"], flop: [...], turn, river, unclear}` |
+| `POST /api/speak` | `{"text": "...", "voice"?: "alloy"}` | `audio/mpeg` stream |
+
+Errors are `{"error": {"code", "message"}}` with codes like `openai_not_configured`, `openai_auth`, `openai_quota`, `openai_model`, `rate_limited`, `access_code_required`. With `ACCESS_CODE` set, send it as `X-Access-Code`.
+
+## Adding a feature
+
+1. Server: create `server/routes/<feature>.js`:
+   ```js
+   const { readJson } = require('../http');
+   module.exports = (router, { openai, config }) => {
+     router.post('/api/coach', { metered: true }, async (req, res, { send }) => {
+       const { question } = await readJson(req);
+       const answer = await openai.json({ system: '...', user: question, schema: {...} });
+       send.json(200, answer);
+     });
+   };
+   ```
+   `metered: true` applies the access code and rate limit. Add the file to `server/routes/index.js`, then add a test in `test/`.
+2. Browser: call it with `HandVoice.api.request('/api/coach', {body: JSON.stringify({...}), headers: {'Content-Type': 'application/json'}})`, record speech with `new HandVoice.Recorder()` plus `HandVoice.api.transcribe(blob, {context: 'none'})`, and talk back with `HandVoice.speak(text)`.
