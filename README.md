@@ -13,7 +13,7 @@ A Texas Hold'em trainer. Set up any spot by talking to the coach, picking cards,
 - **Scenario** (`public/scenario.js`): one JSON record for the hand: seats, positions, stacks, your cards, the board, each opponent's known cards / range / style, and the action on every street. The table, the stats and the agent all read and write it.
 - **Engine** (`public/engine.js`): exact 7-card evaluator, range parsing, and equity. Opponents are drawn from their ranges with card removal; with one opponent left on the turn or river every outcome is enumerated (exact), otherwise it simulates 6,000–14,000 deals. Runs in a Web Worker in the browser and in Node on the server.
 - **What you should do** (`recommend` in `engine.js`): a rule-of-thumb gauge at the top of the Read tab. Preflop it compares your hand's starting-hand rank with what players usually open or continue with from your position (and against the raiser's range); after the flop it weighs your win chance against the price, draws, board texture, number of opponents and their styles. Fold / Check · Call / Bet · Raise, with a size and the reasons. It is not a solver.
-- **Coach agent** (`server/agent/`): an LLM that turns what you say into tool calls (`setup_table`, `set_hero_cards`, `set_board`, `set_opponent`, `set_action`, `show_street`, `new_hand`, `get_table`, `calculate`, `what_if`). It never invents numbers: `calculate` and `what_if` run the engine and the reply quotes those results.
+- **Coach agent** (`server/agent/`): an LLM that turns what you say into one `update_table` call (every change at once; it returns fresh stats and the recommendation), plus `calculate` (another street) and `what_if` (compare without changing the table). Each message already carries the current stats, so a plain question needs no tool call. A setup is two model calls; progress streams to the page so the table updates before the written answer arrives. It never invents numbers.
 
 The LLM is the interface, not the calculator. Poker probabilities need exact arithmetic that a model can't do reliably; the engine is exact, fast and free, and the model handles language, setup and explanation.
 
@@ -92,7 +92,7 @@ test/                node:test suites
 | Route | Body | Returns |
 |---|---|---|
 | `GET /api/status` | | features, models, agent provider, limits |
-| `POST /api/agent` | `{message, scenario, history?}` | `{reply, scenario, changes, stats, provider, model}` |
+| `POST /api/agent` | `{message, scenario, history?}` | `{reply, scenario, changes, stats, provider, model}`; with `Accept: application/x-ndjson`, a stream of `status` / `scenario` events then `done` |
 | `POST /api/transcribe?context=cards\|none` | raw audio (`audio/webm`, mp4, ogg, wav, mp3) | `{text}` |
 | `POST /api/cards/parse` | `{text}` | `{hero, flop, turn, river, unclear}` |
 | `POST /api/speak` | `{text, voice?}` | `audio/mpeg` |

@@ -27,15 +27,17 @@ function loadConfig() {
       ttsVoice: str('OPENAI_TTS_VOICE', 'alloy'),
       ttsInstructions: str('OPENAI_TTS_INSTRUCTIONS', 'Speak like a calm, friendly poker coach. Clear and unhurried.'),
       agentModel: str('OPENAI_AGENT_MODEL', 'gpt-6-astra'),
+      // Reasoning effort for the coach on OpenAI reasoning models (none|low|medium|high); 'off' sends no setting.
+      agentReasoning: str('OPENAI_AGENT_REASONING', 'low'),
     },
     // The table agent runs on OpenAI or Claude. AGENT_PROVIDER picks one; unset = Claude when ANTHROPIC_API_KEY is set, else OpenAI.
     agent: {
       provider: str('AGENT_PROVIDER').toLowerCase(),
-      maxRounds: int('AGENT_MAX_ROUNDS', 8),
+      maxRounds: int('AGENT_MAX_ROUNDS', 4),
       anthropicKey: str('ANTHROPIC_API_KEY'),
       anthropicModel: str('ANTHROPIC_MODEL', 'claude-opus-5-5'),
       anthropicBaseUrl: str('ANTHROPIC_BASE_URL'),
-      effort: str('AGENT_EFFORT', 'medium'),
+      effort: str('AGENT_EFFORT', 'low'),
       timeoutMs: int('AGENT_TIMEOUT_MS', 90000),
     },
   };

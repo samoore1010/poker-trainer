@@ -416,20 +416,40 @@
     worker.onmessage = ({ data }) => { const p = pending.get(data.id); if (!p) return; pending.delete(data.id); data.error ? p.resolve(runSync(p.kind, p.args)) : p.resolve(data.result); };
     worker.onerror = () => { worker = null; pending.forEach(p => p.resolve(runSync(p.kind, p.args))); pending.clear(); };
   } catch (e) { worker = null; } // file:// pages can't start workers; compute on the page instead
-  function compute(kind, args) {
+  // One job at a time, oldest first; jobs for a table that has since changed are dropped before they start.
+  const queue = []; let running = false;
+  function runJob(kind, args) {
     return new Promise(resolve => {
       if (!worker) { setTimeout(() => resolve(runSync(kind, args)), 0); return; }
       const id = ++jobId; pending.set(id, { resolve, kind, args }); worker.postMessage({ id, kind, args });
     });
   }
+  function pump() {
+    if (running) return;
+    while (queue.length && queue[0].g !== gen) queue.shift().resolve(null);
+    const j = queue.shift(); if (!j) return;
+    running = true;
+    runJob(j.kind, j.args).then(r => { running = false; j.resolve(r); pump(); });
+  }
+  function compute(kind, args, g) { return new Promise(resolve => { queue.push({ kind, args, g, resolve }); pump(); }); }
   let renderQueued = false;
   const scheduleRender = () => { if (renderQueued) return; renderQueued = true; requestAnimationFrame(() => { renderQueued = false; if (hand) renderPane(); }); };
-  function job(key, kind, args) {
-    if (cache[key] && 'result' in cache[key]) return cache[key].result;
-    if (!cache[key]) { const g = gen; cache[key] = {}; compute(kind, args).then(r => { if (g !== gen) return; cache[key].result = r; scheduleRender(); }); }
+  // A quick pass (a couple of thousand deals, ~10× faster) shows numbers right away; the full pass then refines them.
+  function job(key, kind, args, quickArgs) {
+    const c = cache[key];
+    if (c && c.result) return c.result;
+    if (!c) {
+      const g = gen, entry = cache[key] = {};
+      const set = (r, full) => { if (!r || g !== gen || entry.full) return; entry.result = r; entry.full = full; scheduleRender(); };
+      if (quickArgs) compute(kind, quickArgs, g).then(r => set(r, false));
+      compute(kind, args, g).then(r => set(r, true));
+    }
     return null;
   }
-  const sim = s => job('s' + s, 'equity', { hero: hand.hero, board: hand.board.slice(0, BOARD_N[s]), opps: SC.engineOpponents(scenario, s), trials: BOARD_N[s] === 5 ? 6000 : 14000 });
+  function sim(s) {
+    const args = { hero: hand.hero, board: hand.board.slice(0, BOARD_N[s]), opps: SC.engineOpponents(scenario, s) };
+    return job('s' + s, 'equity', { ...args, trials: BOARD_N[s] === 5 ? 6000 : 14000 }, { ...args, trials: 2000 });
+  }
   const chanceFor = s => { const r = sim(s); return r ? r.chance : null; };
 
   // ----- table -----
@@ -708,13 +728,18 @@
     const history = coachLog.slice(-6).map(x => ({ role: x.role, text: x.text }));
     coachLog.push({ role: 'user', text });
     if (tab === 'coach') renderPane();
+    let undoPushed = false, applied = '';
+    const applyScenario = sc => { const key = JSON.stringify(sc); if (key === applied) return; applied = key; if (!undoPushed) { pushUndo(); undoPushed = true; } loadScenario(sc); };
     try {
-      const res = await HV.api.request('/api/agent', { body: JSON.stringify({ message: text, scenario, history }), headers: { 'Content-Type': 'application/json' } });
-      pushUndo();
+      // Streamed: the table updates as soon as the coach's changes land; the written answer follows.
+      const res = await HV.api.stream('/api/agent', { message: text, scenario, history }, ev => {
+        if (ev.type === 'status') coachNote(ev.text);
+        else if (ev.type === 'scenario') { applyScenario(ev.scenario); coachNote('Table updated. Writing the answer…'); }
+      });
       lastReply = { text: res.reply || 'Done.', changes: res.changes || [] };
       coachLog.push({ role: 'assistant', text: lastReply.text, changes: lastReply.changes });
       $('askIn').value = ''; coachNote(tab === 'coach' ? '' : 'Done. The coach’s reply is in the Coach tab.');
-      loadScenario(res.scenario);
+      if (res.changes && res.changes.length) applyScenario(res.scenario);
     } catch (e) {
       coachLog.pop();
       coachNote(e.message || 'The coach could not answer.', true);
@@ -773,7 +798,7 @@
     return `<div class="strip">${strip.map((v, i) => `<div class="${i + 1 === on ? 'on' : ''}"><span>${Math.round(v)}</span><i style="height:${Math.max(3, v / mx * 100)}%"></i><span>${i + 1}</span></div>`).join('')}</div><p class="note">Against random hands.</p>`;
   }
   function threatRows(S, nb) {
-    const T = E.threatsNow(hand.hero, board(), SC.engineOpponents(scenario, step)); const keys = new Set([...[...T.groups.values()].filter(g => g.inRange).map(g => g.label), ...S.rivG.keys()]);
+    const T = cache['t' + step] || (cache['t' + step] = E.threatsNow(hand.hero, board(), SC.engineOpponents(scenario, step))); const keys = new Set([...[...T.groups.values()].filter(g => g.inRange).map(g => g.label), ...S.rivG.keys()]);
     const rows = [...keys].map(k => { const tg = T.groups.get(k), riv = S.rivG.get(k);
       return { label: k, desc: tg ? tg.desc : '', combos: tg ? tg.combos.length : 0, ord: tg ? tg.ord : riv ? riv.ord : 0, now: tg ? tg.pNow : 0, river: riv ? riv.n / S.trials * 100 : 0 }; })
       .filter(r => r.now >= 0.5 || r.river >= 0.5);
