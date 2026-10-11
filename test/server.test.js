@@ -46,7 +46,8 @@ const audio = () => Buffer.alloc(4000, 1);
 test('status reports features and never the key', () => withApp(config(), async url => {
   const r = await fetch(url + '/api/status'); const j = await r.json();
   assert.equal(r.status, 200);
-  assert.deepEqual(j.features, { transcribe: true, parseCards: true, speak: true });
+  assert.deepEqual(j.features, { transcribe: true, parseCards: true, speak: true, agent: true });
+  assert.deepEqual(j.agent, { provider: 'openai', model: 'gpt-6-astra' });
   assert.ok(!JSON.stringify(j).includes('sk-test'));
 }));
 

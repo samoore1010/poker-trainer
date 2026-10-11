@@ -12,5 +12,8 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0"
   }
 }

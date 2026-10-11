@@ -71,6 +71,9 @@ function createOpenAI(cfg, { fetchImpl = fetch, log = () => {} } = {}) {
       try { return JSON.parse(msg.content); } catch (e) { throw new HttpError(502, 'openai_bad_json', 'OpenAI returned malformed JSON.'); }
     },
 
+    // Raw Responses API call (used by the agent's tool loop).
+    responses(body) { return call('/responses', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); },
+
     // Text → speech. Returns the fetch Response so the route can stream audio straight through.
     async speak(text, { voice = cfg.ttsVoice, instructions = cfg.ttsInstructions, format = 'mp3' } = {}) {
       const body = { model: cfg.ttsModel, input: text, voice, response_format: format };

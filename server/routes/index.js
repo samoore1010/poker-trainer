@@ -5,4 +5,5 @@ module.exports = [
   require('./system'),
   require('./voice'),
   require('./cards'),
+  require('./agent'),
 ];
