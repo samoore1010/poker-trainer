@@ -1,0 +1,19 @@
+{
+  "name": "hand-walkthrough",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Poker hand trainer with OpenAI-powered voice card entry and text-to-speech.",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test",
+    "check:openai": "node scripts/check-openai.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0"
+  }
+}
