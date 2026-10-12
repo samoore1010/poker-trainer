@@ -30,6 +30,15 @@ The LLM is the interface, not the calculator. Poker probabilities need exact ari
 
 Without keys the app still runs: stats, card picker and browser speech recognition work; the coach bar is hidden.
 
+## Setting up a hand
+
+Everything is edited right on the table, at any point, without re-dealing; the stats update as soon as a card changes.
+
+- **Cards:** tap any card spot (your two cards, the five board spots, an opponent's cards). A small picker opens there: tap a rank, then a suit, or just type it (`a` `h`). It moves to the next spot by itself. *Random* puts a spot back to a random card; Backspace does the same, Esc closes.
+- **Street by street:** on preflop, fill the three flop spots and the table moves to the flop (any open preflop betting is finished with checks and calls); then the turn, then the river. Change an earlier card at any time; you stay on the street you're on.
+- **Players:** tap a player's badge or name to set how they play (Nit, Tight, Regular, Loose, Station, Maniac), a range (`Top 15%` or `TT+, AQs+, AKo`), their exact cards, their stack, or *Sit here* to take their seat.
+- **Say or type it:** the bar at the top understands setups on your device, instantly: *"ace king suited on the button, six handed, flop queen seven deuce rainbow, turn the nine of hearts"*, *"pocket nines in the big blind"*, *"AhKd flop Qs7h2c"*. 🎙 uses the browser's own speech recognition (Chrome, Edge, Safari), so cards land on the table while you're still talking; with no browser speech it records and transcribes on the server. Anything it can't turn into an edit ("make him tighter", "should I call?") goes to the coach.
+
 ## Using the coach
 
 Type or 🎙 in the bar at the top:
