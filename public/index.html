@@ -195,6 +195,42 @@
   .ab.rec { outline: 2px solid var(--glow); outline-offset: 1px; }
   .ab.rec span::before { content: "★ "; color: var(--warn); }
   .actbar.docked { position: static; transform: none; margin: 0; grid-column: 1 / -1; min-width: 0; box-shadow: none; }
+
+  /* Editing on the table */
+  .editable { cursor: pointer; }
+  .card.editable:hover, .slot.editable:hover { outline: 2px solid rgba(255,255,255,.55); outline-offset: 2px; }
+  .slot.editable { display: grid; place-items: center; transition: background .15s; }
+  .slot.editable::after { content: "+"; color: rgba(255,255,255,.4); font: 600 1.3rem var(--body); }
+  .slot.editable:hover { background: rgba(255,255,255,.08); }
+  .editing { outline: 3px solid var(--glow) !important; outline-offset: 2px; }
+  .card.pending { opacity: .8; box-shadow: 0 0 0 2px var(--glow); }
+  .seat .av, .seat .nm { cursor: pointer; }
+  body.is-editing .actbar:not(.docked) { visibility: hidden; }
+  .seat .av:hover { border-color: #fff; }
+  .cardpick { position: fixed; z-index: 40; width: 300px; padding: 9px 10px 10px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 14px 36px rgba(0,0,0,.4); display: grid; gap: 7px; }
+  .cardpick[hidden] { display: none; }
+  .cardpick.sheet { left: 0 !important; right: 0; bottom: 0; top: auto !important; width: auto; border-radius: 14px 14px 0 0; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .cp-head { display: flex; justify-content: space-between; align-items: center; font: 600 .72rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .cp-x { border: 0; background: none; padding: 0 4px; font-size: 1.1rem; line-height: 1; color: var(--muted); }
+  .cp-ranks { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cp-ranks button, .cp-suits button { padding: 7px 0; font: 600 .95rem var(--mono); border-radius: 6px; background: var(--card-face); color: var(--card-black); border-color: var(--line); }
+  .cp-ranks button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .cp-suits { display: grid; grid-template-columns: repeat(4, 1fr) auto; gap: 4px; }
+  .cp-suits button { font-size: 1.25rem; }
+  .cp-suits button.red { color: var(--card-red); }
+  .cp-suits .cp-rand { font: 500 .78rem var(--body); padding: 0 10px; background: var(--panel); color: var(--fg); }
+  .cardpick button:disabled { opacity: .25; }
+  .cp-hint { margin: 0; font-size: .72rem; color: var(--muted); }
+  .seatpop { width: 330px; }
+  .sp-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .sp-l { font: 600 .66rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); width: 44px; }
+  .sp-chips { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
+  .sp-chips button { padding: 3px 8px; font-size: .76rem; border-radius: 12px; }
+  .sp-chips button.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .sp-range { display: flex; gap: 6px; flex: 1; margin: 0; }
+  .sp-range input { flex: 1; min-width: 0; font: 400 .82rem var(--mono); padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+  .sp-range button, .sp-btns button { padding: 4px 10px; font-size: .78rem; }
+  .seatpop .note { margin: 0; }
   .spk { padding: 1px 7px; font-size: .9rem; line-height: 1.2; border-color: transparent; background: transparent; }
   .pk-act .note { margin-right: auto; }
 
@@ -289,8 +325,8 @@
 <div class="app">
   <div class="bar">
     <span class="brand">Hand Walkthrough</span>
-    <form class="ask" id="askForm" hidden autocomplete="off">
-      <input id="askIn" type="text" placeholder="Set up any spot or ask anything: “I’m on the button with A♥Q♥, a tight player raises from UTG…”" aria-label="Tell the coach what to set up or ask a question">
+    <form class="ask" id="askForm" autocomplete="off">
+      <input id="askIn" type="text" placeholder="Set up a hand: “ace king suited on the button, flop queen seven deuce” · or ask the coach" aria-label="Tell the coach what to set up or ask a question">
       <span class="meter" id="askMeter" hidden aria-hidden="true"><i></i></span>
       <button type="button" id="askMic" class="ghost" title="Speak" aria-label="Speak to the coach" hidden>🎙</button>
       <button type="submit" class="primary" id="askBtn">Go</button>
@@ -322,23 +358,8 @@
           <span class="hint" id="hint"></span>
           <button id="backBtn">Back</button>
           <button class="primary" id="nextBtn">Show the flop</button>
-          <button class="ghost" id="pickBtn" aria-expanded="false">Pick cards</button>
+          <button class="ghost" id="pickBtn" title="Or tap any card on the table">Edit cards</button>
           <button id="dealBtn">New hand</button>
-        </div>
-        <div class="picker" id="picker" hidden>
-          <div class="pk-head">
-            <div class="slots" id="slots"></div>
-            <button class="ghost x" id="pkClose" aria-label="Close card picker">×</button>
-          </div>
-          <div class="say">
-            <input type="text" id="sayIn" placeholder="Say or type it: ace of spades, jack of hearts, flop king of hearts ten of hearts two of hearts, turn eight of spades, river three of diamonds" aria-label="Describe the deal">
-            <span class="meter" id="micMeter" hidden aria-hidden="true"><i></i></span>
-            <button id="micBtn" class="ghost" aria-label="Dictate with microphone" title="Dictate">🎙</button>
-            <button id="sayBtn">Set cards</button>
-          </div>
-          <p class="note sayNote" id="sayNote">Click cards to fill the slots, or describe the deal above. Your two cards are required; flop, turn and river are optional and fill in order.</p>
-          <div class="deck" id="deck"></div>
-          <div class="pk-act"><span class="note" id="pkNote"></span><button class="ghost" id="pkClear">Clear</button><button class="primary" id="pkDeal">Deal this hand</button></div>
         </div>
       </div>
     </div>
@@ -352,7 +373,10 @@
     </aside>
   </div>
 </div>
+<div class="cardpick" id="cardpick" hidden role="dialog" aria-label="Choose a card"></div>
+<div class="cardpick seatpop" id="seatpop" hidden role="dialog" aria-label="Edit player"></div>
 <script src="engine.js"></script>
+<script src="setup-parser.js"></script>
 <script src="scenario.js"></script>
 <script src="voice.js"></script>
 <script>
@@ -433,15 +457,15 @@
     commitRevealed(); renderAll();
   }
   function pushUndo() { undoStack.push({ scenario: SC.clone(scenario), hand: { deal: hand.deal, hero: hand.hero.slice(), board: hand.board.slice(), opps: hand.opps.map(o => o.slice()) } }); if (undoStack.length > 30) undoStack.shift(); $('undoBtn').disabled = false; }
-  function undo() { const u = undoStack.pop(); if (!u) return; lastReply = null; loadScenario(u.scenario, { prev: u.hand }); $('undoBtn').disabled = !undoStack.length; }
+  function undo() { const u = undoStack.pop(); if (!u) return; pendingFlop = [null, null, null]; lastReply = null; loadScenario(u.scenario, { prev: u.hand }); $('undoBtn').disabled = !undoStack.length; }
   // Edits through the same operations the agent uses.
   function edit(name, args, opts = {}) {
     if (opts.undo !== false) pushUndo();
     const res = SC.apply(scenario, name, args);
-    if (!res.ok) { console.warn(res.error); return res; }
+    if (!res.ok) { if (opts.undo !== false) { undoStack.pop(); $('undoBtn').disabled = !undoStack.length; } return res; }
     loadScenario(scenario); return res;
   }
-  function newHand() { autoRun++; pushUndo(); lastReply = null; SC.apply(scenario, 'new_hand', { keep_ranges: true }); loadScenario(scenario, { prev: null }); }
+  function newHand() { pendingFlop = [null, null, null]; autoRun++; pushUndo(); lastReply = null; SC.apply(scenario, 'new_hand', { keep_ranges: true }); loadScenario(scenario, { prev: null }); }
 
   const board = () => hand.board.slice(0, BOARD_N[step]);
   const liveSeats = s => hand.m.liveAfter[Math.min(s, 3)].filter(x => x > 0);
@@ -529,7 +553,14 @@
   function renderTable() {
     const h = hand, nb = BOARD_N[step], bd = board(), m = h.m, s3 = Math.min(step, 3), snap = m.street[s3];
     const bEl = $('board'); bEl.innerHTML = ''; const g = glowSet(h.hero, bd);
-    h.board.slice(0, nb).forEach(c => bEl.appendChild(cardEl(c, g.has(c) ? 'glow' : ''))); for (let i = nb; i < 5; i++) { const s = document.createElement('div'); s.className = 'slot'; bEl.appendChild(s); }
+    if (step !== 0) pendingFlop = [null, null, null];
+    for (let i = 0; i < 5; i++) {
+      let el;
+      if (i < nb) el = cardEl(h.board[i], g.has(h.board[i]) ? 'glow' : '');
+      else if (i < 3 && pendingFlop[i] !== null) el = cardEl(pendingFlop[i], 'pending');
+      else { el = document.createElement('div'); el.className = 'slot'; el.title = i < 3 ? 'Choose the flop' : i === 3 ? 'Choose the turn' : 'Choose the river'; }
+      el.dataset.slot = 'board:' + i; el.classList.add('editable'); bEl.appendChild(el);
+    }
     const over = step === 4 || (m.ended && step >= m.ended.street) || (heroOut() && step >= m.foldedAt[0]);
     const w = step === 4 ? winners() : m.ended ? [m.ended.winner] : heroOut() ? [-1] : [];
     // the pot shows everything in, including this street's bets (which also sit in front of the players)
@@ -539,7 +570,7 @@
     const behind = seat => (seat === 0 ? scenario.hero.stack : scenario.opponents[seat - 1].stack) - m.contribAt[s3][seat];
     $('heroStack').textContent = money(behind(0));
     $('heroPos').textContent = h.pos[0];
-    const hc = $('heroCards'); hc.innerHTML = ''; h.hero.forEach(c => hc.appendChild(cardEl(c, 'lg' + (g.has(c) ? ' glow' : '') + (m.foldedAt[0] !== null && m.foldedAt[0] <= s3 ? ' dim' : ''))));
+    const hc = $('heroCards'); hc.innerHTML = ''; h.hero.forEach((c, i) => { const el = cardEl(c, 'lg editable' + (g.has(c) ? ' glow' : '') + (m.foldedAt[0] !== null && m.foldedAt[0] <= s3 ? ' dim' : '')); el.dataset.slot = 'hero:' + i; el.title = 'Change this card'; hc.appendChild(el); });
     const live = isLive(), turn = live ? m.next : null;
     const heroLast = seatAction(0, step);
     $('heroAct').textContent = over ? (m.foldedAt[0] !== null ? 'You folded' : w.includes(0) ? (w.length > 1 ? 'Split pot' : 'You win') : step === 4 ? 'Showdown' : 'Hand over')
@@ -552,10 +583,10 @@
       const s = document.createElement('div'); s.className = 'seat' + (over && w.includes(seat) ? ' win' : '') + (folded ? ' folded' : '') + (turn === seat ? ' turn' : '');
       s.style.left = p.x + '%'; s.style.top = p.y + '%'; s.dataset.seat = seat;
       const cs = document.createElement('div'); cs.className = 'cards';
-      if ((step === 4 && !folded) || o.cards) h.opps[i].forEach(c => cs.appendChild(cardEl(c, 'sm' + (o.cards ? ' known' : ''))));
-      else if (!folded) for (let k = 0; k < 2; k++) { const b = document.createElement('div'); b.className = 'card sm back'; cs.appendChild(b); }
+      if ((step === 4 && !folded) || o.cards) h.opps[i].forEach((c, k) => { const el = cardEl(c, 'sm editable' + (o.cards ? ' known' : '')); el.dataset.slot = `opp:${seat}:${k}`; cs.appendChild(el); });
+      else if (!folded) for (let k = 0; k < 2; k++) { const b = document.createElement('div'); b.className = 'card sm back editable'; b.dataset.slot = `opp:${seat}:${k}`; b.title = `Set ${o.name}'s cards`; cs.appendChild(b); }
       s.appendChild(cs);
-      const av = document.createElement('div'); av.className = 'av'; av.textContent = h.pos[seat]; av.title = SC.POS_NAMES[h.pos[seat]] || ''; s.appendChild(av);
+      const av = document.createElement('div'); av.className = 'av'; av.textContent = h.pos[seat]; av.title = `${SC.POS_NAMES[h.pos[seat]] || ''} · click to edit ${o.name}`; s.appendChild(av);
       const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = o.name; s.appendChild(nm);
       if (SC.effRange(o) || o.note) { const r = document.createElement('div'); r.className = 'rg'; r.textContent = o.range || cap(o.style || '') || ''; r.title = `${SC.rangeLabel(o)}${o.note ? ' — ' + o.note : ''}`; if (r.textContent) s.appendChild(r); }
       const stEl = document.createElement('div'); stEl.className = 'st'; stEl.textContent = money(behind(seat)); s.appendChild(stEl);
@@ -681,88 +712,189 @@
   }
   function glowSet(hero, bd) { if (bd.length < 3) return rankOf(hero[0]) === rankOf(hero[1]) ? new Set(hero) : new Set(); return E.handCards(hero, bd); }
 
-  // ----- card picker -----
-  let pick = [null, null, null, null, null, null, null]; // you ×2, flop ×3, turn, river
-  const SLOT_GROUPS = [['You', [0, 1]], ['Flop', [2, 3, 4]], ['Turn', [5]], ['River', [6]]];
-  function pickStatus() {
-    const f = pick.slice(2, 5).filter(x => x !== null).length, t = pick[5] !== null, r = pick[6] !== null;
-    if (pick[0] === null || pick[1] === null) return [false, 'Pick your two cards.'];
-    if (f > 0 && f < 3) return [false, 'Pick all three flop cards, or clear them.'];
-    if (t && f < 3) return [false, 'A turn card needs a flop.'];
-    if (r && !t) return [false, 'A river card needs a turn.'];
-    return [true, f === 0 ? 'Ready. The board will be random.' : `Ready with a set ${r ? 'flop, turn and river' : t ? 'flop and turn' : 'flop'}.`];
+  // ----- editing on the table -----
+  // Every card spot is clickable: your two cards, the five board spots, opponents' cards. A small picker opens right
+  // there (rank, then suit — or type "ah"); the change applies in place and the stats update. Nothing is re-dealt.
+  // Board spots past the current street fill the next street: three flop cards move the table to the flop, and so on.
+  const PK_RANKS = 'AKQJT98765432'.split(''), PK_SUITS = [['s', '♠'], ['h', '♥'], ['d', '♦'], ['c', '♣']];
+  let edit_ = null, pickRank = null, pendingFlop = [null, null, null];
+  const slotKey = s => s.kind === 'opp' ? `opp:${s.seat}:${s.i}` : `${s.kind}:${s.i}`;
+  const parseSlot = k => { const [kind, a, b] = k.split(':'); return kind === 'opp' ? { kind, seat: +a, i: +b } : { kind, i: +a }; };
+  function slotCard(s) {
+    if (s.kind === 'hero') return hand.hero[s.i];
+    if (s.kind === 'opp') return hand.opps[s.seat - 1][s.i];
+    if (s.i < BOARD_N[step]) return hand.board[s.i];
+    return s.i < 3 ? pendingFlop[s.i] : null;
   }
+  // Cards fixed somewhere else in the hand (can't be picked for this spot). Hidden cards don't count: they re-deal around you.
+  function fixedElsewhere(s) {
+    const out = new Set(), own = slotCard(s);
+    scenario.hero.cards.forEach(c => out.add(E.cardFromCode(c)));
+    scenario.board.forEach(c => out.add(E.cardFromCode(c)));
+    hand.board.slice(0, BOARD_N[step]).forEach(c => out.add(c));
+    scenario.opponents.forEach(o => (o.cards || []).forEach(c => out.add(E.cardFromCode(c))));
+    pendingFlop.forEach(c => c !== null && out.add(c));
+    if (own !== null && own !== undefined) out.delete(own);
+    return out;
+  }
+  function slotLabel(s) {
+    if (s.kind === 'hero') return `Your ${s.i ? 'second' : 'first'} card`;
+    if (s.kind === 'opp') return `${scenario.opponents[s.seat - 1].name}'s ${s.i ? 'second' : 'first'} card`;
+    return s.i < 3 ? `Flop card ${s.i + 1}` : s.i === 3 ? 'Turn' : 'River';
+  }
+  function openPicker(s) {
+    if (!s) return;
+    if (s.kind === 'board' && s.i >= 3 && s.i > BOARD_N[step] && BOARD_N[step] < 3 && !pendingFlop.every(x => x !== null)) s = { kind: 'board', i: pendingFlop.findIndex(x => x === null) }; // fill the flop first
+    edit_ = s; pickRank = null; renderPicker();
+  }
+  function closePicker() { edit_ = null; pickRank = null; $('cardpick').hidden = true; document.body.classList.toggle('is-editing', seatEdit !== null); document.querySelectorAll('.editing').forEach(e => e.classList.remove('editing')); }
   function renderPicker() {
-    const sl = $('slots'); sl.innerHTML = '';
-    const nextI = pick.findIndex(x => x === null);
-    SLOT_GROUPS.forEach(([lbl, idx], gi) => {
-      if (gi) { const gp = document.createElement('span'); gp.className = 'gap'; sl.appendChild(gp); }
-      const l = document.createElement('span'); l.className = 'lbl'; l.textContent = lbl; sl.appendChild(l);
-      idx.forEach(i => { const d = document.createElement('div'); d.className = 'slot-s' + (pick[i] !== null ? ' filled' : '') + (i === nextI ? ' next' : ''); d.dataset.slot = i; d.title = lbl; if (pick[i] !== null) d.appendChild(cardEl(pick[i], 'sm')); sl.appendChild(d); });
-    });
-    const dk = $('deck'); dk.innerHTML = '';
-    for (let su = 3; su >= 0; su--) for (let r = 12; r >= 0; r--) { const c = r * 4 + su; const b = document.createElement('button'); b.type = 'button'; b.className = (isRed(c) ? 'red' : '') + (pick.includes(c) ? ' sel' : ''); b.dataset.card = c; b.textContent = RANKS[r] + SYM[su]; dk.appendChild(b); }
-    const [ok, msg] = pickStatus(); $('pkDeal').disabled = !ok; $('pkNote').textContent = msg;
+    const el = $('cardpick'); if (!edit_) { el.hidden = true; return; }
+    document.body.classList.add('is-editing');
+    const blocked = fixedElsewhere(edit_), cur = slotCard(edit_);
+    const free = (r, su) => !blocked.has(E.cardFromCode(r + su));
+    el.innerHTML = `<div class="cp-head"><span>${esc(slotLabel(edit_))}${cur !== null && cur !== undefined ? ` · now ${E.cardText(cur)}` : ''}</span><button type="button" class="cp-x" data-cp="close" aria-label="Close">×</button></div>
+      <div class="cp-ranks">${PK_RANKS.map(r => `<button type="button" data-cp-rank="${r}" class="${pickRank === r ? 'on' : ''}" ${PK_SUITS.every(([su]) => !free(r, su)) ? 'disabled' : ''}>${r === 'T' ? '10' : r}</button>`).join('')}</div>
+      <div class="cp-suits">${PK_SUITS.map(([su, sym]) => `<button type="button" data-cp-suit="${su}" class="${su === 'h' || su === 'd' ? 'red' : ''}" ${pickRank && !free(pickRank, su) ? 'disabled' : ''}>${sym}</button>`).join('')}
+      ${edit_.kind !== 'board' || edit_.i < BOARD_N[step] ? '' : ''}<button type="button" class="cp-rand" data-cp="random" title="Back to a random card">Random</button></div>
+      <p class="cp-hint">${pickRank ? 'Now the suit' : 'Pick a rank, then a suit · or type it, like “ah”'}</p>`;
+    el.hidden = false;
+    document.querySelectorAll('.editing').forEach(e => e.classList.remove('editing'));
+    const target = document.querySelector(`[data-slot="${slotKey(edit_)}"]`);
+    if (target) target.classList.add('editing');
+    if (narrow.matches || !target) { el.classList.add('sheet'); el.style.left = el.style.top = ''; return; }
+    el.classList.remove('sheet');
+    const r = target.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight;
+    const below = r.bottom + 8 + h < innerHeight;
+    el.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px';
+    el.style.top = (below ? r.bottom + 8 : Math.max(8, r.top - h - 8)) + 'px';
   }
-  // Natural-language deal parser: "ace of spades, jack of hearts, flop king of hearts ten of hearts two of hearts, turn eight of spades, river three of diamonds" (shorthand like "As Jh" works too).
-  const RW = { ace: 12, aces: 12, a: 12, king: 11, kings: 11, k: 11, queen: 10, queens: 10, q: 10, jack: 9, jacks: 9, j: 9, ten: 8, tens: 8, t: 8, '10': 8, nine: 7, nines: 7, '9': 7, eight: 6, eights: 6, '8': 6, seven: 5, sevens: 5, '7': 5, six: 4, sixes: 4, '6': 4, five: 3, fives: 3, '5': 3, four: 2, fours: 2, '4': 2, three: 1, threes: 1, trey: 1, '3': 1, two: 0, twos: 0, deuce: 0, '2': 0 };
-  const SW = { club: 0, clubs: 0, c: 0, diamond: 1, diamonds: 1, d: 1, heart: 2, hearts: 2, h: 2, spade: 3, spades: 3, s: 3 };
-  const SECT = { deal: 0, me: 0, hand: 0, hole: 0, you: 0, your: 0, my: 0, flop: 1, flopped: 1, turn: 2, river: 3, board: 1 };
-  // Words speech recognition often hears in place of a rank or suit. They only count when a suit follows, so "to the turn" stays harmless.
-  const RW_SOUND = { for: 2, fore: 2, to: 0, too: 0, tu: 0, ate: 6, tree: 1, free: 1, nein: 7, tin: 8, jacques: 9, que: 10, kay: 11, ay: 12, eh: 12 };
-  const SW_SOUND = { harts: 2, hards: 2, heart: 2, arts: 2, spayed: 3, spaded: 3, spades: 3, space: 3, spaces: 3, clovers: 0, clover: 0, clubbed: 0, diamond: 1, diamonte: 1, dimonds: 1 };
-  const suitWord = w => w in SW ? SW[w] : w in SW_SOUND ? SW_SOUND[w] : undefined;
-  // Ranks said without a suit wait for the next suit word, so "ten nine two of clubs" is three clubs.
-  function parseDeal(text) {
-    const toks = text.toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
-    const groups = [[], [], [], []]; let g = 0, errs = [], held = [];
-    const push = c => { if (groups.flat().includes(c)) { errs.push(RANKS[rankOf(c)] + SYM[suitOf(c)] + ' twice'); return; } groups[g].push(c); };
-    const flushHeld = () => { held.forEach(w => errs.push(`${w}: no suit`)); held = []; };
-    for (let i = 0; i < toks.length; i++) {
-      const w = toks[i];
-      if (w in SECT) { flushHeld(); g = SECT[w]; continue; }
-      if (w === 'of' || w === 'the' || w === 'and' || w === 'is' || w === 'a' && suitWord(toks[i + 1]) === undefined) continue;
-      const m = w.match(/^(10|[2-9]|[akqjt])([cdhs])$/); // shorthand As, 10h, Kd
-      if (m) { flushHeld(); push(RW[m[1]] * 4 + SW[m[2]]); continue; }
-      if (w in RW || w in RW_SOUND) {
-        let j = i + 1; if (toks[j] === 'of' || toks[j] === 'a') j++;
-        const su = suitWord(toks[j]), strong = w in RW && (w.length > 1 || /\d/.test(w));
-        if (su !== undefined) { held.concat(w).forEach(x => push((x in RW ? RW[x] : RW_SOUND[x]) * 4 + su)); held = []; i = j; }
-        else if (strong) held.push(w);
-      }
+  // Applies one picked card (int) to the spot being edited, or null for "back to random". Returns the next spot to fill.
+  function applyCard(s, c) {
+    const codes = cs => cs.map(E.codeOf);
+    if (s.kind === 'hero') {
+      if (c === null) { edit('set_hero_cards', { cards: [] }); return null; }
+      const cards = hand.hero.slice(); cards[s.i] = c;
+      if (cards[0] === cards[1]) return s;
+      edit('set_hero_cards', { cards: codes(cards) });
+      return s.i === 0 ? { kind: 'hero', i: 1 } : null;
     }
-    flushHeld();
-    return { groups, errs };
-  }
-  function applyParsed(text, live) {
-    const { groups, errs } = parseDeal(text);
-    if (live && !groups.flat().length) return;
-    const all = groups.flat();
-    const np = [null, null, null, null, null, null, null];
-    if (all.length && !groups[1].length && !groups[2].length && !groups[3].length) all.slice(0, 7).forEach((c, i) => np[i] = c); // no street words: fill in order 2 / 3 / 1 / 1
-    else {
-      groups[0].slice(0, 2).forEach((c, i) => np[i] = c);
-      groups[1].slice(0, 3).forEach((c, i) => np[2 + i] = c);
-      if (groups[2][0] !== undefined) np[5] = groups[2][0];
-      if (groups[3][0] !== undefined) np[6] = groups[3][0];
+    if (s.kind === 'opp') {
+      const hadCards = !!scenario.opponents[s.seat - 1].cards;
+      if (c === null) { edit('set_opponent', { seat: s.seat, cards: null }); return null; }
+      const cards = hand.opps[s.seat - 1].slice(); cards[s.i] = c;
+      // the other card stays unless it clashes with a card fixed somewhere else (not counting this player's own pair)
+      const others = fixedElsewhere(s); (scenario.opponents[s.seat - 1].cards || []).forEach(x => others.delete(E.cardFromCode(x)));
+      if (cards[0] === cards[1] || others.has(cards[1 - s.i])) cards[1 - s.i] = E.DECK.find(x => x !== c && !others.has(x));
+      edit('set_opponent', { seat: s.seat, cards: codes(cards) });
+      return s.i === 0 && !hadCards ? { kind: 'opp', seat: s.seat, i: 1 } : null;
     }
-    if (!all.length) { sayNote('No cards recognized. Try "ace of spades, jack of hearts" or "As Jh".', true); return; }
-    pick = np; renderPicker();
-    if (live) { sayNote(`Heard ${all.length} card${all.length > 1 ? 's' : ''} so far. Keep going, or click the mic to stop.`); return; }
-    sayNote(errs.length ? 'Set what I could. Skipped: ' + errs.join(', ') : `Set ${all.length} card${all.length > 1 ? 's' : ''}. Check the slots, then deal.`, errs.length > 0);
+    // board
+    const shown = BOARD_N[step];
+    if (s.i < shown) { // a card already on the table: swap it, stay on this street
+      const cards = hand.board.slice(0, Math.max(shown, scenario.board.length));
+      if (c === null) { const keep = scenario.board.length > s.i ? s.i < 3 ? 0 : s.i : scenario.board.length; edit('set_board', { cards: codes(cards.slice(0, keep)), show: false }); return null; }
+      cards[s.i] = c; edit('set_board', { cards: codes(cards), show: false }); return null;
+    }
+    if (s.i < 3) { // building the flop from preflop
+      pendingFlop[s.i] = c; if (c === null) { renderTable(); return null; }
+      const nextEmpty = pendingFlop.findIndex(x => x === null);
+      if (nextEmpty >= 0) { renderTable(); return { kind: 'board', i: nextEmpty }; }
+      const flop = pendingFlop.slice(); pendingFlop = [null, null, null];
+      edit('set_board', { cards: codes(flop) });
+      return null;
+    }
+    if (c === null) return null;
+    // turn or river from an earlier street: earlier spots keep what's on the table (or as dealt)
+    const cards = hand.board.slice(0, s.i); cards.push(c);
+    edit('set_board', { cards: codes(cards) });
+    return null;
   }
-  function sayNote(t, err) { const n = $('sayNote'); n.textContent = t; n.classList.toggle('err', !!err); }
-  $('sayBtn').addEventListener('click', () => resolveText($('sayIn').value));
-  $('sayIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); resolveText($('sayIn').value); } });
-  // Microphone: browser speech recognition (Chrome, Edge, Safari) is the fallback when the server has no OpenAI key.
+  function pickCard(c) {
+    const s = edit_; if (!s) return;
+    const next = applyCard(s, c);
+    if (next) openPicker(next); else closePicker();
+  }
+  $('cardpick').addEventListener('click', e => {
+    const x = e.target.closest('button'); if (!x || x.disabled) return;
+    if (x.dataset.cp === 'close') return closePicker();
+    if (x.dataset.cp === 'random') return pickCard(null);
+    if (x.dataset.cpRank) { pickRank = x.dataset.cpRank; return renderPicker(); }
+    if (x.dataset.cpSuit && pickRank) pickCard(E.cardFromCode(pickRank + x.dataset.cpSuit));
+  });
+  // Keyboard while the picker is open: rank then suit ("a" "h", "1" "0" for ten), Backspace = random, Esc = close.
+  let typed = '';
+  document.addEventListener('keydown', e => {
+    if (!edit_ || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+    const k = e.key.toLowerCase();
+    if (k === 'escape') { closePicker(); return; }
+    if (k === 'backspace' || k === 'delete') { e.preventDefault(); pickCard(null); return; }
+    if (/^[akqjt2-9]$/.test(k) || (k === '1' && !typed) || (k === '0' && typed === '1')) {
+      e.preventDefault(); typed = k === '0' ? 't' : k === '1' ? '1' : k;
+      if (typed !== '1') { pickRank = typed.toUpperCase(); renderPicker(); }
+      return;
+    }
+    if (/^[shdc]$/.test(k) && pickRank) {
+      e.preventDefault(); typed = '';
+      const c = E.cardFromCode(pickRank + k);
+      if (!fixedElsewhere(edit_).has(c)) pickCard(c);
+    }
+  });
+  document.addEventListener('pointerdown', e => { if (edit_ && !e.target.closest('#cardpick') && !e.target.closest('[data-slot]')) closePicker(); if (seatEdit && !e.target.closest('#seatpop') && !e.target.closest('.seat .av, .seat .nm')) closeSeat(); });
+  narrow.addEventListener('change', () => { if (edit_) renderPicker(); });
+
+  // ----- player editor (click a player's badge or name) -----
+  const STYLE_CHIPS = [['', 'Random'], ['nit', 'Nit'], ['tight', 'Tight'], ['regular', 'Regular'], ['loose', 'Loose'], ['calling station', 'Station'], ['maniac', 'Maniac']];
+  let seatEdit = null;
+  function closeSeat() { seatEdit = null; $('seatpop').hidden = true; document.body.classList.toggle('is-editing', edit_ !== null); }
+  function openSeat(seat) {
+    seatEdit = seat; document.body.classList.add('is-editing'); const o = scenario.opponents[seat - 1], el = $('seatpop'), pos = hand.pos[seat];
+    const rp = SC.effRange(o) ? Math.round(E.rangeOf(SC.effRange(o)).pct) : null;
+    el.innerHTML = `<div class="cp-head"><span>${esc(o.name)} · ${pos}</span><button type="button" class="cp-x" data-sp="close" aria-label="Close">×</button></div>
+      <div class="sp-row"><span class="sp-l">Plays</span><div class="sp-chips">${STYLE_CHIPS.map(([v, l]) => `<button type="button" data-sp-style="${v}" class="${!o.range && (o.style || '') === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+      <div class="sp-row"><span class="sp-l">Range</span><div class="sp-chips">${[8, 15, 25, 40].map(p => `<button type="button" data-sp-range="top ${p}%" class="${o.range === `top ${p}%` ? 'on' : ''}">Top ${p}%</button>`).join('')}</div></div>
+      <form class="sp-range" data-sp-form><input name="range" value="${esc(o.range || '')}" placeholder="e.g. TT+, AQs+, AKo" aria-label="Range"><button type="submit">Set</button></form>
+      <p class="note">${o.cards ? `Known cards: ${o.cards.map(c => E.cardText(E.cardFromCode(c))).join(' ')}` : `Holding: ${rp === null ? 'any two cards' : `top ${rp}% of hands`}`}</p>
+      <div class="sp-row sp-btns"><button type="button" data-sp="cards">${o.cards ? 'Change cards' : 'Set their cards'}</button>${o.cards ? '<button type="button" data-sp="unknown">Make unknown</button>' : ''}<button type="button" data-sp="sit" title="Move yourself to this seat's position">Sit here</button></div>
+      <div class="sp-row"><span class="sp-l">Stack</span><form class="sp-range" data-sp-stack><input name="stack" type="number" min="1" value="${o.stack}" aria-label="Stack"><button type="submit">Set</button></form></div>`;
+    el.hidden = false;
+    const anchor = document.querySelector(`.seat[data-seat="${seat}"] .av`);
+    if (narrow.matches || !anchor) { el.classList.add('sheet'); el.style.left = el.style.top = ''; return; }
+    el.classList.remove('sheet');
+    const r = anchor.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight;
+    el.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px';
+    el.style.top = (r.bottom + 10 + h < innerHeight ? r.bottom + 10 : Math.max(8, r.top - h - 10)) + 'px';
+  }
+  $('seatpop').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b || seatEdit === null) return;
+    const seat = seatEdit;
+    if (b.dataset.sp === 'close') return closeSeat();
+    if ('spStyle' in b.dataset) { edit('set_opponent', { seat, style: b.dataset.spStyle, range: '' }); return openSeat(seat); }
+    if (b.dataset.spRange) { edit('set_opponent', { seat, range: b.dataset.spRange }); return openSeat(seat); }
+    if (b.dataset.sp === 'cards') { closeSeat(); return openPicker({ kind: 'opp', seat, i: 0 }); }
+    if (b.dataset.sp === 'unknown') { edit('set_opponent', { seat, cards: null }); return openSeat(seat); }
+    if (b.dataset.sp === 'sit') { closeSeat(); edit('setup_table', { hero_position: hand.pos[seat] }); }
+  });
+  $('seatpop').addEventListener('submit', e => {
+    e.preventDefault(); const seat = seatEdit; if (seat === null) return;
+    const f = e.target;
+    if (f.matches('[data-sp-form]')) { const r = edit('set_opponent', { seat, range: f.range.value }); if (r && !r.ok) { f.range.setCustomValidity(r.error); f.range.reportValidity(); f.range.setCustomValidity(''); return; } }
+    if (f.matches('[data-sp-stack]')) edit('set_opponent', { seat, stack: +f.stack.value });
+    openSeat(seat);
+  });
+  $('table').addEventListener('click', e => {
+    const slot = e.target.closest('[data-slot]');
+    if (slot) { closeSeat(); return openPicker(parseSlot(slot.dataset.slot)); }
+    const who = e.target.closest('.seat .av, .seat .nm');
+    if (who) { closePicker(); const seat = +who.closest('.seat').dataset.seat; return seatEdit === seat ? closeSeat() : openSeat(seat); }
+  });
+  $('pickBtn').addEventListener('click', () => openPicker({ kind: 'hero', i: 0 }));
+
+  // ----- voice and typed setups: understood on this device, instantly -----
+  // The browser's own speech recognition (Chrome, Edge, Safari) streams words as you speak; each phrase updates the
+  // table straight away. Words the app can't turn into an edit ("tight", "raises", questions) go to the coach instead.
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const OS_DICTATION = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? 'press Fn twice (or the keyboard mic) to dictate into the box' : /Win/.test(navigator.platform || '') ? 'press Win+H to dictate into the box' : 'use your keyboard\'s dictation to speak into the box';
-  const SILENCE_MS = 4000;
-  let rec = null, micFinal = '', micErr = null, micTimer = 0;
-  const micBtn = $('micBtn');
-  const NOTE0 = $('sayNote').textContent;
-  if (!SR) { micBtn.hidden = true; $('sayNote').textContent += ` This browser has no built-in speech recognition (Chrome, Edge or Safari do); ${OS_DICTATION}.`; }
-  else if (!window.isSecureContext) { micBtn.disabled = true; micBtn.title = 'Dictation needs an https:// page'; }
   function micUi(btn, live) { btn.classList.toggle('live', live); btn.setAttribute('aria-pressed', live ? 'true' : 'false'); btn.title = live ? 'Stop' : 'Speak'; }
   async function micBlockedReason(code) {
     if (code === 'audio-capture') {
@@ -775,44 +907,83 @@
     if (code === 'service-not-allowed') return `This browser's speech service is turned off. In Safari, enable Siri or Dictation in system settings; otherwise ${OS_DICTATION}.`;
     return 'Microphone permission was not granted. Click the mic again and choose Allow.';
   }
-  const MIC_ERR = {
-    'no-speech': 'No speech heard. Click the mic and say your cards, like "ace of spades, king of hearts".',
-    network: `Speech recognition needs an internet connection to the browser's speech service. Check your connection, or ${OS_DICTATION}.`,
-    'language-not-supported': `This browser can't recognize English speech. ${cap(OS_DICTATION)}.`,
-    'bad-grammar': 'Speech recognition failed. Try again.',
-  };
-  function armSilence() { clearTimeout(micTimer); micTimer = setTimeout(() => { if (rec) rec.stop(); }, SILENCE_MS); }
-  function stopMic() { if (cloudRec) cloudRec.cancel(); if (rec) { try { rec.stop(); } catch (e) {} } }
-  function startMic() {
-    micFinal = ''; micErr = null; $('sayIn').value = '';
+  const snapHand = () => ({ deal: hand.deal, hero: hand.hero.slice(), board: hand.board.slice(), opps: hand.opps.map(o => o.slice()) });
+  // Turns parsed words into the same edits the table uses, on a copy of `base`. Returns {sc, said, errors}.
+  function buildSetup(p, base, baseHand, memo) {
+    const used = new Set();
+    if (!p.groups.hero.length) base.hero.cards.forEach(c => used.add(E.cardFromCode(c)));
+    if (!(p.groups.flop.length || p.groups.turn.length || p.groups.river.length)) base.board.forEach(c => used.add(E.cardFromCode(c)));
+    base.opponents.forEach(o => (o.cards || []).forEach(c => used.add(E.cardFromCode(c))));
+    if (p.groups.hero.length === 0 && baseHand) baseHand.hero.forEach(c => used.add(c));
+    const r = SetupParser.resolve(p, { used, runout: baseHand ? baseHand.board : [], memo });
+    const sc = SC.clone(base), errors = r.errors.slice();
+    const run = (name, args) => { const x = SC.apply(sc, name, args); if (!x.ok) errors.push(x.error); };
+    if (r.opponents) run('setup_table', { opponents: r.opponents });
+    if (r.position) run('setup_table', { hero_position: r.position });
+    if (r.hero) run('set_hero_cards', { cards: r.hero });
+    if (r.board) run('set_board', { cards: r.board });
+    return { sc, said: r.said, errors };
+  }
+  // Typed (or transcribed) text: apply locally when it's all understood, otherwise ask the coach.
+  function handleText(text, opts = {}) {
+    text = (text || '').trim(); if (!text) return;
+    const p = SetupParser.parse(text), ok = SetupParser.understood(p), agent = HV && HV.api.has('agent');
+    if (ok && (!p.unknown.length || !agent)) {
+      const out = buildSetup(p, opts.base || scenario, opts.baseHand || snapHand(), opts.memo || {});
+      if (!opts.base) pushUndo();
+      loadScenario(out.sc, { prev: opts.baseHand || hand });
+      $('askIn').value = '';
+      coachNote(`Set: ${out.said.join(' · ')}${out.errors.length ? ` — ${out.errors.join('; ')}` : ''}${p.unknown.length ? ` (ignored: ${p.unknown.join(' ')})` : ''}`, !!out.errors.length);
+      return;
+    }
+    if (agent) { if (opts.base) loadScenario(opts.base, { prev: opts.baseHand }); askAgent(text); return; }
+    coachNote('Not understood. Try “ace king suited on the button, flop queen seven deuce”, or tap a card on the table.', true);
+  }
+  let live = null; // the current live dictation
+  function startLive() {
+    const base = SC.clone(scenario), baseHand = snapHand(), memo = {};
+    let rec;
     try { rec = new SR(); rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = true; rec.maxAlternatives = 1; }
-    catch (err) { rec = null; sayNote(`Dictation isn't available in this browser. ${cap(OS_DICTATION)}.`, true); return; }
-    const r = rec;
-    r.onstart = () => { micUi(micBtn, true); sayNote('Listening… say your cards, like "ace of spades, king of hearts, flop ten nine two of clubs". Click the mic to stop.'); armSilence(); };
-    r.onresult = e => {
-      if (r !== rec) return;
-      let fin = '', interim = '';
-      for (let i = 0; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) fin += t + ' '; else interim += t + ' '; }
-      $('sayIn').value = (fin + interim).replace(/\s+/g, ' ').trim();
-      if (fin.trim() && fin !== micFinal) { micFinal = fin; applyParsed(micFinal, true); }
+    catch (e) { return false; }
+    pushUndo();
+    live = { rec, base, baseHand, memo, text: '', err: null, timer: 0, applied: '' };
+    const apply = () => {
+      if (!live) return;
+      const p = SetupParser.parse(live.text);
+      if (!SetupParser.understood(p)) return;
+      const key = JSON.stringify([p.groups, p.position, p.opponents]);
+      if (key === live.applied) return; live.applied = key;
+      const out = buildSetup(p, live.base, live.baseHand, live.memo);
+      loadScenario(out.sc, { prev: live.baseHand });
+      coachNote(`Hearing: ${out.said.join(' · ')}`);
+    };
+    let silence = 0;
+    const armSilence = () => { clearTimeout(silence); silence = setTimeout(() => { try { rec.stop(); } catch (e) {} }, 2500); };
+    rec.onstart = () => { micUi($('askMic'), true); coachNote('Listening… say the setup, like “ace king suited on the button, flop queen seven deuce”. Tap 🎙 to stop.'); armSilence(); };
+    rec.onresult = e => {
+      let t = ''; for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript + ' ';
+      live.text = t.replace(/\s+/g, ' ').trim(); $('askIn').value = live.text;
+      clearTimeout(live.timer); live.timer = setTimeout(apply, 120); // cards land on the table as each phrase is heard
       armSilence();
     };
-    r.onerror = e => { if (e.error !== 'aborted') micErr = e.error; };
-    r.onend = async () => {
-      if (r !== rec) return;
-      rec = null; clearTimeout(micTimer); micUi(micBtn, false);
-      const text = $('sayIn').value.trim();
-      if (micErr === 'not-allowed' || micErr === 'service-not-allowed' || micErr === 'audio-capture') sayNote(await micBlockedReason(micErr), true);
-      else if (micErr && !text) sayNote(MIC_ERR[micErr] || 'Dictation stopped: ' + micErr, true);
-      else if (text) applyParsed(text);
-      else sayNote(MIC_ERR['no-speech'], true);
+    rec.onerror = e => { if (live && e.error !== 'aborted' && e.error !== 'no-speech') live.err = e.error; };
+    rec.onend = async () => {
+      clearTimeout(silence); micUi($('askMic'), false);
+      const l = live; live = null; if (!l) return;
+      clearTimeout(l.timer);
+      if (l.err && !l.text) {
+        // blocked or no speech service: fall back to recording + OpenAI transcription when the server has it
+        if ((l.err === 'network' || l.err === 'service-not-allowed') && HV && HV.api.has('transcribe') && HV.recordingSupported()) { coachNote('Using server transcription…'); return cloudListen(); }
+        coachNote(l.err === 'network' ? `The browser's speech service is unreachable. ${cap(OS_DICTATION)}.` : await micBlockedReason(l.err), true);
+        return;
+      }
+      if (!l.text) { coachNote('Didn’t hear anything. Tap 🎙 and speak, or type the setup.', true); return; }
+      handleText(l.text, { base: l.base, baseHand: l.baseHand, memo: l.memo });
     };
-    try { r.start(); sayNote('Starting the microphone… allow access if your browser asks.'); }
-    catch (err) { rec = null; micUi(micBtn, false); sayNote('Could not start the microphone. Try again.', true); }
+    try { rec.start(); } catch (e) { live = null; return false; }
+    return true;
   }
-  // Server voice (when the server has an OpenAI key): record here, transcribe with OpenAI.
-  let voiceMode = SR ? 'browser' : null, cloudRec = null, voiceBusy = false;
-  // Records one utterance with a level meter and returns the transcript ('' if nothing usable). note(text, isError) reports progress.
+  let cloudRec = null, voiceBusy = false;
   async function recordAndTranscribe(btn, meterEl, note, listeningText) {
     const r = cloudRec = new HV.Recorder({ onLevel: v => meterEl.style.setProperty('--lvl', v.toFixed(3)), onSpeech: () => note('Hearing you… pause when you\'re done, or click the mic to finish.') });
     micUi(btn, true); meterEl.hidden = false; voiceBusy = true;
@@ -834,53 +1005,22 @@
       micUi(btn, false); meterEl.hidden = true; voiceBusy = false; btn.disabled = false;
     }
   }
-  async function cloudDictate() {
+  async function cloudListen() {
+    const text = await recordAndTranscribe($('askMic'), $('askMeter'), coachNote, 'describe the setup or ask a question.');
+    if (text) { $('askIn').value = text; handleText(text); }
+  }
+  function stopMic() { if (cloudRec) cloudRec.cancel(); if (live) { try { live.rec.stop(); } catch (e) {} } }
+  const canLive = () => !!SR && window.isSecureContext;
+  $('askMic').addEventListener('click', () => {
+    if (live) { try { live.rec.stop(); } catch (e) {} return; }
     if (cloudRec) { cloudRec.stop(); return; }
-    if (voiceBusy) return;
-    $('sayIn').value = '';
-    const text = await recordAndTranscribe(micBtn, $('micMeter'), sayNote, 'say your cards, like "ace king of spades, flop ten nine two of clubs".');
-    if (text) { $('sayIn').value = text; await resolveText(text); }
-  }
-  // Typed or transcribed text → cards. The local parser handles plain "ace of spades" speech instantly;
-  // anything it can't fully read goes to the server's AI card parser when available.
-  async function resolveText(text) {
-    const { groups, errs } = parseDeal(text);
-    if (!text.trim() || (!errs.length && groups.flat().length >= 2) || !HV || !HV.api.has('parseCards')) return applyParsed(text);
-    sayNote('Working out the cards…');
-    try { if (applyDeal(await HV.api.parseCards(text))) return; }
-    catch (e) { if (e.code === 'access_code_required' || e.code === 'rate_limited') { sayNote(e.message, true); return; } }
-    applyParsed(text);
-  }
-  function applyDeal(d) {
-    const np = [null, null, null, null, null, null, null];
-    d.hero.forEach((c, i) => np[i] = E.cardFromCode(c)); d.flop.forEach((c, i) => np[2 + i] = E.cardFromCode(c));
-    if (d.turn) np[5] = E.cardFromCode(d.turn); if (d.river) np[6] = E.cardFromCode(d.river);
-    const n = np.filter(x => x !== null).length;
-    if (!n) { if (!d.unclear) return false; sayNote(`Couldn't pin down the cards: ${d.unclear}`, true); return true; }
-    pick = np; renderPicker();
-    sayNote(`Set ${n} card${n > 1 ? 's' : ''}. ${d.unclear ? `Not sure about: ${d.unclear}` : 'Check the slots, then deal.'}`, !!d.unclear);
-    return true;
-  }
-  micBtn.addEventListener('click', () => { if (voiceMode === 'cloud') cloudDictate(); else if (rec) stopMic(); else startMic(); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') stopMic(); });
-  $('deck').addEventListener('click', e => { const b = e.target.closest('[data-card]'); if (!b) return; const c = +b.dataset.card; const at = pick.indexOf(c); if (at >= 0) { pick[at] = null; } else { const i = pick.indexOf(null); if (i < 0) return; pick[i] = c; } renderPicker(); });
-  $('slots').addEventListener('click', e => { const s = e.target.closest('[data-slot]'); if (!s) return; pick[+s.dataset.slot] = null; renderPicker(); });
-  $('pkClear').addEventListener('click', () => { pick = [null, null, null, null, null, null, null]; $('sayIn').value = ''; renderPicker(); sayNote('Click cards to fill the slots, or describe the deal above.'); });
-  function setPicker(open) { if (!open) stopMic(); $('picker').hidden = !open; $('pickBtn').setAttribute('aria-expanded', open ? 'true' : 'false'); if (open) renderPicker(); }
-  // Dealing from the picker keeps the table (players, ranges, action) and swaps in the chosen cards.
-  $('pkDeal').addEventListener('click', () => {
-    const [ok] = pickStatus(); if (!ok) return;
-    const bd = pick.slice(2).filter(x => x !== null).map(E.codeOf);
-    setPicker(false); pushUndo(); lastReply = null;
-    SC.apply(scenario, 'new_hand', { keep_ranges: true });
-    SC.apply(scenario, 'set_hero_cards', { cards: [pick[0], pick[1]].map(E.codeOf) });
-    if (bd.length) SC.apply(scenario, 'set_board', { cards: bd, show: false });
-    loadScenario(scenario, { prev: null });
+    if (voiceBusy || agentBusy) return;
+    if (canLive() && startLive()) return;
+    if (HV && HV.api.has('transcribe') && HV.recordingSupported()) cloudListen();
+    else coachNote(`Voice isn't available in this browser. ${cap(OS_DICTATION)}.`, true);
   });
-  $('pickBtn').addEventListener('click', () => setPicker($('picker').hidden));
-  $('pkClose').addEventListener('click', () => setPicker(false));
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('picker').hidden) setPicker(false); });
-  document.addEventListener('pointerdown', e => { if (!$('picker').hidden && !e.target.closest('#picker') && !e.target.closest('#pickBtn')) setPicker(false); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') stopMic(); });
+  $('askMic').hidden = !canLive();
 
   // ----- coach agent -----
   const SUGGESTIONS = [
@@ -922,14 +1062,8 @@
       renderPane();
     }
   }
-  $('askForm').addEventListener('submit', e => { e.preventDefault(); askAgent($('askIn').value); });
+  $('askForm').addEventListener('submit', e => { e.preventDefault(); handleText($('askIn').value); });
   $('undoBtn').addEventListener('click', undo);
-  $('askMic').addEventListener('click', async () => {
-    if (cloudRec) { cloudRec.stop(); return; }
-    if (voiceBusy || agentBusy) return;
-    const text = await recordAndTranscribe($('askMic'), $('askMeter'), coachNote, 'describe a spot or ask a question.');
-    if (text) { $('askIn').value = text; coachNote(''); askAgent(text); }
-  });
   function renderCoach() {
     if (!HV || !HV.api.has('agent')) return blk('Coach', `<p class="note">The coach sets up any scenario from a description and explains the numbers. It needs the app running on its server with OPENAI_API_KEY or ANTHROPIC_API_KEY set.</p>`);
     let html = '';
@@ -1102,15 +1236,8 @@
 
   // Server features light up once /api/status answers (nothing changes when the page is opened from disk).
   if (HV) HV.api.init().then(() => {
-    if (HV.api.has('transcribe') && HV.recordingSupported()) {
-      voiceMode = 'cloud'; micBtn.hidden = false; micBtn.disabled = false; micBtn.title = 'Speak';
-      if (!SR) sayNote(NOTE0);
-    }
-    if (HV.api.has('agent')) {
-      $('askForm').hidden = false;
-      $('askMic').hidden = !(HV.api.has('transcribe') && HV.recordingSupported());
-      $('coachTab').hidden = false;
-    }
+    $('askMic').hidden = !(canLive() || (HV.api.has('transcribe') && HV.recordingSupported()));
+    if (HV.api.has('agent')) $('coachTab').hidden = false;
     if (hand) renderPane();
   });
 
