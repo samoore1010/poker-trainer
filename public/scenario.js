@@ -46,7 +46,7 @@
     const n = clamp(Math.round(num(opts.opponents, 5)), 1, 8), stack = Math.max(1, num(opts.stack, 200)), bb = Math.max(0.02, num(opts.bigBlind, 2));
     const names = E.shuffle(NAMES.slice());
     return {
-      v: 2, bigBlind: bb, smallBlind: opts.smallBlind != null ? clamp(num(opts.smallBlind, bb / 2), 0, bb) : bb / 2, button: n - 1, street: 0, deal: Math.floor(Math.random() * 1e9),
+      v: 2, bigBlind: bb, smallBlind: opts.smallBlind != null ? clamp(num(opts.smallBlind, bb / 2), 0, bb) : bb / 2, button: n - 1, street: 0, deal: Math.floor(Math.random() * 1e9), handNo: 1, heroHidden: false,
       hero: { name: 'You', stack, cards: [] },
       opponents: Array.from({ length: n }, (_, i) => ({ ...defaultOpponent(i, stack), name: names[i], stack: opts.randomStacks === false ? stack : stack - 50 + E.rnd(11) * 10 })),
       board: [],
@@ -65,6 +65,7 @@
     const sc = {
       v: 2, bigBlind: bb, smallBlind: clamp(num(src.smallBlind, bb / 2), 0, bb), button: ((Math.round(num(src.button, n - 1)) % (n + 1)) + n + 1) % (n + 1),
       street: clamp(Math.round(num(src.street, 0)), 0, 4), deal: Math.round(num(src.deal, 0)),
+      handNo: Math.max(1, Math.round(num(src.handNo, 1))), heroHidden: !!src.heroHidden,
       hero: { name: 'You', stack: Math.max(0, num(src.hero && src.hero.stack, 200)), cards: [] },
       opponents: [], board: [], streets: [], note: typeof src.note === 'string' ? src.note.slice(0, 500) : '',
     };
@@ -184,7 +185,7 @@
   const cap1s = x => x.charAt(0).toUpperCase() + x.slice(1);
   function readOf(sc, seat, s) {
     s = Math.max(0, Math.min(3, s === undefined ? sc.street : s));
-    const key = JSON.stringify([sc.streets, sc.board, sc.hero.cards, sc.opponents, sc.button, sc.bigBlind, sc.smallBlind, sc.hero.stack, seat, s]);
+    const key = JSON.stringify([sc.streets, sc.board, sc.heroHidden ? [] : sc.hero.cards, sc.opponents, sc.button, sc.bigBlind, sc.smallBlind, sc.hero.stack, seat, s]);
     const hit = readMemo.get(key); if (hit) return hit;
     const r = buildRead(sc, seat, s);
     if (readMemo.size > 80) readMemo.clear();
@@ -195,7 +196,7 @@
     if (o.cards) { const cs = o.cards.map(E.cardFromCode); return { kind: 'known', combos: [[cs[0], cs[1], 1]], n: 1, pct: 100 / 1326, steps: [{ text: `You set their cards: ${prettyList(o.cards)}.`, n: 1 }], groups: [], summary: `known: ${prettyList(o.cards)}` }; }
     // cards you can see: yours, the board, anyone's known cards
     const dead = new Set(board);
-    sc.hero.cards.forEach(c => dead.add(E.cardFromCode(c)));
+    if (!sc.heroHidden) sc.hero.cards.forEach(c => dead.add(E.cardFromCode(c))); // face-down cards you haven't seen tell you nothing
     sc.opponents.forEach((x, i) => { if (i !== seat - 1 && x.cards) x.cards.forEach(c => dead.add(E.cardFromCode(c))); });
     const w = new Map(); // a*52+b → weight
     const steps = [], total = () => { let t = 0; w.forEach((x, k) => { if (!dead.has(Math.floor(k / 52)) && !dead.has(k % 52)) t += x; }); return t; };
@@ -419,6 +420,7 @@
       seat, street: m.frontier, owe: Math.min(owe, leftNow), canCheck: owe <= 0, pot: snap.pot,
       callAllIn: owe >= leftNow, canRaise: leftNow > owe, kind,
       small: { to: small, allIn: small >= cap }, big: { to: big, allIn: big >= cap, same: big <= small },
+      facing: snap.max, minTo: Math.min(cap, minTo), maxTo: cap,
     };
   }
 
@@ -591,6 +593,7 @@
       return { ok: true, summary: `Table: ${out.join(', ') || 'unchanged'}` };
     },
     set_hero_cards(sc, a) {
+      sc.heroHidden = false;
       if (!a.cards || !a.cards.length) { sc.hero.cards = []; return { ok: true, summary: 'Your cards: random' }; }
       const p = parseCards(a.cards, [2], { hero: { cards: [] }, board: [], opponents: [] });
       if (p.error) return { ok: false, error: p.error };
@@ -709,10 +712,57 @@
     new_hand(sc, a) {
       sc.hero.cards = []; sc.board = []; sc.opponents.forEach(o => { o.cards = null; });
       if (!a.keep_ranges) sc.opponents.forEach(o => { o.range = ''; o.style = ''; o.note = ''; });
-      resetAction(sc); sc.deal = Math.floor(Math.random() * 1e9);
+      resetAction(sc); sc.deal = Math.floor(Math.random() * 1e9); sc.heroHidden = false;
       return { ok: true, summary: `New hand${a.keep_ranges ? ' (players kept)' : ''}` };
     },
+    // The next hand at the same table: stacks as the last hand left them (stacks: [you, seat 1 …], e.g. from
+    // settleHand), anyone at zero rebuys for 100 big blinds, the button moves one seat on, players keep their names,
+    // styles and notes. Your cards start face down (hidden) until they're set, unless deal_cards.
+    next_hand(sc, a) {
+      const n = sc.opponents.length, players = [sc.hero].concat(sc.opponents), rebuys = [];
+      if (Array.isArray(a.stacks) && a.stacks.length === n + 1) players.forEach((p, i) => { p.stack = Math.max(0, round(num(a.stacks[i], p.stack))); });
+      players.forEach(p => { if (!(p.stack > 0)) { p.stack = 100 * sc.bigBlind; rebuys.push(p.name); } });
+      sc.button = (sc.button + 1) % (n + 1);
+      ops.new_hand(sc, { keep_ranges: true });
+      sc.heroHidden = !a.deal_cards; sc.handNo = (sc.handNo || 1) + 1;
+      return { ok: true, summary: `Hand ${sc.handNo}: dealer on ${sc.button === 0 ? 'you' : sc.opponents[sc.button - 1].name}${rebuys.length ? `; ${rebuys.join(', ')} rebought for ${round(100 * sc.bigBlind)}` : ''}` };
+    },
   };
+  // ----- between hands -----
+  // Plays out what's left of a hand (opponents with the computer player, you check/call unless you've folded), then pays
+  // the pot, side pots included, to the best hands still in. cards: {hero, opps, board (all 5)} as card ints.
+  // → {stacks: [you, seat 1 …] after the hand, won: [chips each seat takes], showdown, winners: [seats], played: [text]}
+  function settleHand(sc, cards) {
+    const w = clone(sc), players = w.opponents.length + 1, played = [];
+    for (let guard = 0; guard < 200; guard++) {
+      const m = money(w); if (m.ended || m.next === null) break;
+      const seat = m.next, snap = m.street[m.frontier];
+      const a = seat === 0 ? { action: snap.max > snap.contrib[0] ? 'call' : 'check' } : autoAction(w, seat, cards.opps[seat - 1], cards.board.slice(0, BOARD_N[m.frontier]));
+      const r = apply(w, 'act', { seat, action: a.action, amount: a.amount });
+      if (!r.ok) break; played.push(r.summary);
+    }
+    const m = money(w), contrib = m.contrib, won = new Array(players).fill(0);
+    const inHand = contrib.map((_, i) => i).filter(i => m.foldedAt[i] === null);
+    const hole = i => (i === 0 ? cards.hero : cards.opps[i - 1]);
+    let winners = inHand;
+    if (inHand.length === 1) won[inHand[0]] = m.potFinal;
+    else {
+      const val = inHand.map(i => E.evalHand(hole(i).concat(cards.board))), valOf = i => val[inHand.indexOf(i)];
+      winners = [];
+      const levels = [...new Set(contrib.filter(x => x > 0))].sort((x, y) => x - y);
+      let prev = 0;
+      for (const L of levels) {
+        const part = contrib.reduce((t, x) => t + Math.max(0, Math.min(x, L) - prev), 0);
+        const elig = inHand.filter(i => contrib[i] >= L), pool = elig.length ? elig : inHand;
+        const best = Math.max(...pool.map(valOf)), top = pool.filter(i => valOf(i) === best);
+        top.forEach(i => { won[i] += part / top.length; if (!winners.includes(i)) winners.push(i); });
+        prev = L;
+      }
+    }
+    const stacks = contrib.map((c, i) => Math.max(0, round(stackOf(w, i) - c + won[i])));
+    return { stacks, won: won.map(round), showdown: inHand.length > 1, winners, played };
+  }
+
   // ----- following the betting a camera saw -----
   // seen: {players, heroPosition, toAct, unit, seats: {POS: {folded, bet (chips in on this street), last}}}; street = the
   // street the picture shows (0 preflop … 3 river). On a copy, plays the actions this table is missing, in turn order:
@@ -779,7 +829,7 @@
     const behind = seat => round(stackOf(sc, seat) - m.contrib[seat]);
     const lines = [];
     lines.push(`Blinds ${round(sbOf(sc))}/${round(sc.bigBlind)}. ${sc.opponents.length} opponents. Dealer button: ${sc.button === 0 ? 'you' : `seat ${sc.button}`}. Showing: ${STREETS[sc.street]}.`);
-    lines.push(`Seat 0 You (${pos[0]}): cards ${sc.hero.cards.length ? sc.hero.cards.join(' ') : 'not chosen (random)'}, ${behind(0)} behind${m.foldedAt[0] !== null ? `, FOLDED on the ${STREETS[m.foldedAt[0]]}` : ''}.`);
+    lines.push(`Seat 0 You (${pos[0]}): cards ${sc.heroHidden ? 'not known yet (face down until the camera reads them or the user picks them)' : sc.hero.cards.length ? sc.hero.cards.join(' ') : 'not chosen (random)'}, ${behind(0)} behind${m.foldedAt[0] !== null ? `, FOLDED on the ${STREETS[m.foldedAt[0]]}` : ''}.`);
     sc.opponents.forEach((o, i) => {
       const seat = i + 1, f = m.foldedAt[seat];
       lines.push(`Seat ${seat} ${o.name} (${pos[seat]}): ${seatRangeLabel(sc, seat, inf)}${o.style && o.range ? `, style ${o.style}` : ''}, ${behind(seat)} behind${f !== null ? `, FOLDED on the ${STREETS[f]}` : ''}${o.note ? `. Note: ${o.note}` : ''}.`);
@@ -824,7 +874,7 @@
   // likely decisions ("if it folds to you…", "if someone raises…").
   function recommendation(sc, s, hero, board, eq) {
     const m = money(sc);
-    if (m.foldedAt[0] !== null) return { action: 'wait', label: 'You folded', gauge: 0, reasons: ['You are out of this hand. Deal a new one, or use Undo to take the fold back.'], note: '' };
+    if (m.foldedAt[0] !== null) return { action: 'wait', label: 'You folded', gauge: 0, reasons: ['You are out of this hand. Deal the next hand, or use Undo to take the fold back.'], note: '' };
     if (s === m.frontier && s < 4 && !m.ended && m.next !== null && m.next !== 0) return preview(sc, s, hero, board, eq, m);
     return advise(sc, s, hero, board, eq, m);
   }
@@ -844,7 +894,7 @@
       station: live.some(x => /station|fish/.test(sc.opponents[x - 1].style || '')),
       rangesSet: set + guessed > 0, fmt: x => fmt(sc, x),
       note: set + guessed === 0 ? 'Opponents are treated as random hands. Give them a range or style for sharper advice.'
-        : guessed ? 'Opponents\' likely hands are estimated from their preflop actions. Set a range or style on a player to override.' : '',
+        : '',
     };
     if (s3 === 0 && snap) ctx.pre = PS.preflop(preflopCtx(sc, 0, hero, m));
     return E.recommend(ctx);
@@ -882,5 +932,5 @@
     };
   }
 
-  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, readOf, engineOpponent, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, followBetting, setUnit, getUnit, fmt };
+  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, readOf, engineOpponent, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, followBetting, settleHand, setUnit, getUnit, fmt };
 });

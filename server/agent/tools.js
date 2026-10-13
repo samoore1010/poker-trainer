@@ -84,7 +84,7 @@ function readTop(sc, seat, s) {
 // The engine's read of a scenario at a street. Returns a compact object for the model (and the browser).
 function calculate(sc, street, exclude = new Set()) {
   const s = street === undefined || street === null ? Math.min(sc.street, 3) : street;
-  if (sc.hero.cards.length !== 2) return { error: 'The user\'s cards are not set (they are random on the table). Set them with set_hero_cards, or ask the user.' };
+  if (sc.hero.cards.length !== 2 || sc.heroHidden) return { error: 'The user\'s cards are not set (they are random on the table). Set them with set_hero_cards, or ask the user.' };
   const hero = sc.hero.cards.map(E.cardFromCode), want = S.BOARD_N[s];
   const board = sc.board.slice(0, want).map(E.cardFromCode);
   const m = S.money(sc);

@@ -194,3 +194,51 @@ test('camera betting: the flop picture finishes preflop first, amounts in big bl
   assert.equal(m.frontier, 1); assert.deepEqual(m.liveAfter[0], [0, 1, 3]); // UTG, CO and you saw the flop
   assert.equal(m.street[1].max, 8); assert.equal(S.positions(r.sc)[m.next], 'CO');
 });
+
+test('next hand at the same table: pot paid, stacks carried, button moves, your cards face down', () => {
+  const E = require('../public/engine.js');
+  const c = s => s.split(' ').map(E.cardFromCode);
+  const sc = S.create({ opponents: 2, stack: 100, randomStacks: false }); // you BB, seat 1 BTN? check by positions
+  const cards = { hero: c('As Ah'), opps: [c('Kd Kc'), c('2c 7d')], board: c('Ad 9s 4h 3c Jd') };
+  // everyone else folds to you preflop except one caller, then the rest is played out
+  const res = S.settleHand(sc, cards);
+  const total = res.stacks.reduce((a, b) => a + b, 0);
+  assert.equal(total, 300); // chips are never created or lost
+  const before = sc.button;
+  assert.ok(S.apply(sc, 'next_hand', { stacks: res.stacks }).ok);
+  assert.equal(sc.button, (before + 1) % 3);
+  assert.equal(sc.handNo, 2); assert.equal(sc.heroHidden, true);
+  assert.deepEqual([sc.hero.stack, ...sc.opponents.map(o => o.stack)], res.stacks.map(x => x || 200));
+  assert.equal(S.money(sc).street[0].actions.length, 0);
+  // picking your cards turns them face up
+  S.apply(sc, 'set_hero_cards', { cards: ['Qs', 'Qh'] });
+  assert.equal(sc.heroHidden, false);
+  assert.equal(S.normalize(sc).scenario.handNo, 2);
+});
+
+test('settling pays side pots to the best eligible hand', () => {
+  const E = require('../public/engine.js');
+  const c = s => s.split(' ').map(E.cardFromCode);
+  const sc = S.create({ opponents: 2, stack: 100, randomStacks: false });
+  sc.opponents[0].stack = 20; // a short stack
+  const pos = S.positions(sc), order = ['BTN', 'SB', 'BB'].map(p => pos.indexOf(p));
+  // BTN all-in, SB all-in, BB calls
+  for (const seat of order) S.apply(sc, 'act', { seat, action: seat === 0 && pos[0] === 'BB' ? 'call' : 'allin' });
+  const m = S.money(sc);
+  assert.equal(m.foldedAt.every(x => x === null), true);
+  // seat 1 (short) has the best hand: it wins only the main pot (3 × 20)
+  const res = S.settleHand(sc, { hero: c('Kd Kc'), opps: [c('As Ah'), c('2c 7d')], board: c('Ad 9s 4h 3c Jd') });
+  assert.equal(res.won[1], 60);
+  assert.equal(res.stacks.reduce((a, b) => a + b, 0), 220);
+  assert.equal(res.stacks[0], 160); // the side pot goes to your kings
+});
+
+test('your face-down cards say nothing about anyone\'s range', () => {
+  const sc = S.create({ opponents: 2 });
+  sc.hero.cards = ['As', 'Ah']; sc.heroHidden = true;
+  const hidden = S.readOf(sc, 1, 0).n;
+  sc.heroHidden = false;
+  assert.ok(hidden > S.readOf(sc, 1, 0).n); // seen cards remove combos; unseen ones don't
+  sc.heroHidden = true;
+  assert.match(S.summary(sc), /not known yet/);
+});
