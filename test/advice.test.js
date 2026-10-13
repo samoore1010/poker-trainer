@@ -226,3 +226,20 @@ test('computer players raise or fold preflop; stations call more', () => {
   assert.ok(reg.fold > 300 && reg.raise > 30);
   assert.ok(st.call > 20);
 });
+
+test('the read lists hands as a player names them, likeliest kind first', () => {
+  const S = require('../public/scenario.js');
+  const sc = S.create({ opponents: 1 });
+  sc.hero.cards = ['2c', '3d']; sc.board = ['Ah', '6h', 'Ks'];
+  S.apply(sc, 'act', { action: 'call' }); S.apply(sc, 'act', { action: 'check' });
+  const r = S.readOf(sc, 1, 1);
+  const shares = r.groups.filter(g => g.key !== 'air').map(g => g.n);
+  assert.deepEqual(shares, [...shares].sort((a, b) => b - a));
+  if (r.groups.some(g => g.key === 'air')) assert.equal(r.groups[r.groups.length - 1].key, 'air');
+  const all = r.groups.flatMap(g => g.hands);
+  assert.equal(all.reduce((n, h) => n + h.count, 0), r.combos.length);
+  // two hearts on board: a heart only shows on hands with two hearts (a flush draw); A6 offsuit collapses
+  const heart = E.suitOf(E.cardFromCode('Ah'));
+  for (const h of all) h.suits.forEach(su => { if (su !== null) assert.equal(su, heart); });
+  assert.ok(all.some(h => h.suits.every(su => su === null) && h.count > 1));
+});

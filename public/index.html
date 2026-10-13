@@ -291,6 +291,9 @@
   .rc span { font: 600 .66rem var(--mono); padding: 1px 3px; border-radius: 3px; background: var(--card-face); color: var(--card-black); }
   .rc span.red { color: var(--card-red); }
   .rc.lo { opacity: .45; } .rc.mid { opacity: .72; }
+  .rc.hc { gap: 0; padding: 1px 4px 1px 1px; background: var(--card-face); color: var(--card-black); border-radius: 4px; align-items: baseline; }
+  .rc.hc span { padding: 1px 0 1px 3px; background: none; } .rc.hc span + span:not(.t) { padding-left: 0; } .rc.hc span.t { font-weight: 500; opacity: .7; padding-left: 1px; }
+  .rc.hc i { font: 500 .58rem var(--mono); font-style: normal; color: #6b736e; margin-left: 3px; }
   .rcs .more { padding: 0 4px; }
   .rd-legend { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: .7rem; color: var(--muted); }
 
@@ -1819,7 +1822,12 @@
     setTab('range');
   }
   function closeRead() { readSeat = null; $('rangeTab').hidden = true; if (tab === 'range') setTab('read'); }
-  const comboEl = h => { const w = h[2]; return `<span class="rc${w < 0.4 ? ' lo' : w < 0.75 ? ' mid' : ''}" title="${E.cardText(h[0])}${E.cardText(h[1])} · ${Math.round(w * 100)}% as likely as their likeliest hands">${[h[0], h[1]].sort((a, b) => b - a).map(c => `<span class="${isRed(c) ? 'red' : ''}">${RANKS[rankOf(c)]}${SYM[suitOf(c)]}</span>`).join('')}</span>`; };
+  // One hand ("A6", "A♥6", "A6s"): suits only where they matter for a flush; ×n = how many suit combos it stands for.
+  const handEl = h => {
+    const part = (r, su) => su === null ? `<span>${RANKS[r]}</span>` : `<span class="${su === 1 || su === 2 ? 'red' : ''}">${RANKS[r]}${SYM[su]}</span>`;
+    const label = `${part(h.ranks[0], h.suits[0])}${part(h.ranks[1], h.suits[1])}${h.tag ? `<span class="t">${h.tag}</span>` : ''}`;
+    return `<span class="rc hc${h.w < 0.4 ? ' lo' : h.w < 0.75 ? ' mid' : ''}" title="${h.count} combo${h.count > 1 ? 's' : ''} · ${Math.round(h.w * 100)}% as likely as their likeliest hands">${label}${h.count > 1 ? `<i>×${h.count}</i>` : ''}</span>`;
+  };
   function renderRead(seat) {
     const o = scenario.opponents[seat - 1], s3 = Math.min(step, 3), r = SC.readOf(scenario, seat, s3), m = hand.m;
     const folded = m.foldedAt[seat] !== null && m.foldedAt[seat] <= s3;
@@ -1835,13 +1843,13 @@
     html += `<div class="rd-sum"><span class="big">${r.pct >= 10 ? Math.round(r.pct) : Math.round(r.pct * 10) / 10}%<small>of all hands · about ${Math.round(r.n)} combos</small></span>${eqTxt}</div>`;
     if (folded) html += `<p class="note">${esc(o.name)} folded on the ${STEP[m.foldedAt[seat]].toLowerCase()}; this is what they held until then.</p>`;
     html += `<ol class="rd-steps">${r.steps.map(x => `<li>${esc(x.text)}${x.n !== null && x.n !== undefined ? ` <span class="n">→ ${Math.round(x.n)}</span>` : ''}</li>`).join('')}</ol></section>`;
-    const LIM = 30;
+    const LIM = 24;
     const groups = r.groups.map(g => {
-      const share = g.n / r.n * 100, open = readOpen.has(g.key), shown = open ? g.combos : g.combos.slice(0, LIM);
+      const share = g.n / r.n * 100, open = readOpen.has(g.key), shown = open ? g.hands : g.hands.slice(0, LIM);
       return `<div class="rg-grp"><div class="rg-head"><b>${esc(g.name)} <span class="note">${g.combos.length} combo${g.combos.length > 1 ? 's' : ''}</span></b><span class="v">${share < 1 ? '&lt;1' : Math.round(share)}%</span><div class="rg-bar"><i style="width:${Math.max(1, share)}%"></i></div></div>
-        <div class="rcs">${shown.map(comboEl).join('')}${g.combos.length > LIM ? `<button class="more" data-rg="${esc(g.key)}">${open ? 'Fewer' : `+${g.combos.length - LIM} more`}</button>` : ''}</div></div>`;
+        <div class="rcs">${shown.map(handEl).join('')}${g.hands.length > LIM ? `<button class="more" data-rg="${esc(g.key)}">${open ? 'Fewer' : `+${g.hands.length - LIM} more`}</button>` : ''}</div></div>`;
     }).join('');
-    html += blk(`Their likely hands <small>${board().length >= 3 ? 'by what they make on this board' : 'by type'}</small>`, `${groups || '<p class="note">No hands left that fit.</p>'}<div class="rd-legend"><span>Each chip is one exact hand.</span><span><span class="rc"><span>A♠</span></span> likely</span><span><span class="rc mid"><span>A♠</span></span> less likely</span><span><span class="rc lo"><span>A♠</span></span> unlikely</span></div>`);
+    html += blk(`Their likely hands <small>${board().length >= 3 ? 'by what they make on this board' : 'by type'}</small>`, `${groups || '<p class="note">No hands left that fit.</p>'}<div class="rd-legend"><span>×4 = four suit combos; a suit shows only when it counts toward a flush.</span><span><span class="rc hc"><span>A</span><span>6</span></span> likely</span><span><span class="rc hc mid"><span>A</span><span>6</span></span> less likely</span><span><span class="rc hc lo"><span>A</span><span>6</span></span> unlikely</span></div>`);
     return html;
   }
   function setTab(t) { tab = t; document.querySelectorAll('.tabs button').forEach(x => x.setAttribute('aria-selected', x.dataset.tab === t ? 'true' : 'false')); renderPane(); }

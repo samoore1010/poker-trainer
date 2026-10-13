@@ -271,11 +271,33 @@
       if (!groups.has(g)) groups.set(g, { key: g, name: board.length >= 3 ? RG.groupName(g) : g, ord, n: 0, combos: [] });
       const G = groups.get(g); G.n += h[2]; G.combos.push(h);
     }
-    const list = [...groups.values()].sort((x, y) => x.ord - y.ord);
-    list.forEach(G => G.combos.sort((x, y) => y[2] - x[2] || Math.max(y[0], y[1]) - Math.max(x[0], x[1]) || Math.min(y[0], y[1]) - Math.min(x[0], x[1])));
+    // likeliest kind of hand first; "nothing" always last
+    const list = [...groups.values()].sort((x, y) => (x.key === 'air') - (y.key === 'air') || y.n - x.n || x.ord - y.ord);
+    list.forEach(G => { G.combos.sort((x, y) => y[2] - x[2] || Math.max(y[0], y[1]) - Math.max(x[0], x[1]) || Math.min(y[0], y[1]) - Math.min(x[0], x[1])); G.hands = handClasses(G.combos, board); });
     const pct = n / 1326 * 100;
     const summary = kind === 'range' ? `your range: ${o.range} (about ${round(pct)}% of hands)` : `about ${pct >= 10 ? Math.round(pct) : Math.round(pct * 10) / 10}% of hands (${Math.round(n)} combos)`;
     return { kind, combos, n, pct, steps, groups: list, summary, mods: mods.text };
+  }
+  // Combos merged into hands as a player would name them: "A6" (or "A6s" / "A6o" before the flop). A suit is shown only
+  // where it matters: the card helps make or draw to a flush on this board (e.g. "A♥6" when the board has three hearts).
+  // → [{ranks: [hi, lo], suits: [suit|null, suit|null], tag: 's'|'o'|'', count, w (average weight), total}], likeliest first
+  function handClasses(combos, board) {
+    const onBoard = [0, 0, 0, 0]; board.forEach(c => onBoard[E.suitOf(c)]++);
+    const need = board.length >= 5 ? 5 : 4; // a flush, or a flush draw with cards to come
+    const out = new Map();
+    for (const [a, b, w] of combos) {
+      const [hi, lo] = E.rankOf(a) > E.rankOf(b) || (E.rankOf(a) === E.rankOf(b) && E.suitOf(a) > E.suitOf(b)) ? [a, b] : [b, a];
+      const mine = s => (E.suitOf(hi) === s) + (E.suitOf(lo) === s);
+      const suit = c => (board.length >= 3 && onBoard[E.suitOf(c)] + mine(E.suitOf(c)) >= need ? E.suitOf(c) : null);
+      const ranks = [E.rankOf(hi), E.rankOf(lo)], pair = ranks[0] === ranks[1];
+      let suits = board.length >= 3 ? [suit(hi), suit(lo)] : [null, null];
+      if (pair && suits[0] === null && suits[1] !== null) suits = [suits[1], null]; // 6♥6, not 66♥
+      const tag = board.length >= 3 || pair ? '' : E.suitOf(hi) === E.suitOf(lo) ? 's' : 'o';
+      const key = `${ranks.join(',')}|${suits.join(',')}|${tag}`;
+      if (!out.has(key)) out.set(key, { ranks, suits, tag, count: 0, total: 0 });
+      const H = out.get(key); H.count++; H.total += w;
+    }
+    return [...out.values()].map(H => ({ ...H, w: H.total / H.count })).sort((x, y) => y.total - x.total || y.ranks[0] - x.ranks[0] || y.ranks[1] - x.ranks[1]);
   }
   function preflopGroup(a, b) {
     let r1 = E.rankOf(a), r2 = E.rankOf(b); if (r1 < r2) [r1, r2] = [r2, r1];
