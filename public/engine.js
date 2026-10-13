@@ -158,8 +158,15 @@
   const rangeCache = new Map();
   function rangeOf(text) { const k = String(text || '').trim().toLowerCase(); if (!rangeCache.has(k)) { if (rangeCache.size > 200) rangeCache.clear(); rangeCache.set(k, parseRange(text)); } return rangeCache.get(k); }
 
+  // An opponent's possible hands as [a, b, weight]: from weighted combos ({combos: [[a,b,w],...]}, a read) or a range
+  // string (all weight 1). isDead(card) removes hands that use a card already out.
+  function poolOf(o, isDead) {
+    if (Array.isArray(o.combos)) return o.combos.filter(h => h[2] > 0 && !isDead(h[0]) && !isDead(h[1]));
+    return rangeOf(o.range).combos.filter(([a, b]) => !isDead(a) && !isDead(b)).map(([a, b]) => [a, b, 1]);
+  }
+
   // ----- equity -----
-  // opts: {hero:[c,c], board:[...], opps:[{cards:[c,c]} | {range:"QQ+, AK"}], trials, exact:true|false|'auto'}
+  // opts: {hero:[c,c], board:[...], opps:[{cards:[c,c]} | {range:"QQ+, AK"} | {combos:[[a,b,weight],...]}], trials, exact:true|false|'auto'}
   // Opponents with known cards are fixed; the rest are drawn from their range (card removal respected).
   // Exact enumeration runs when one opponent is left and at most one card is to come; otherwise Monte Carlo.
   function equity(opts) {
@@ -173,38 +180,43 @@
       else ranged.push(o);
     }
     const pools = ranged.map(o => {
-      const r = rangeOf(o.range);
-      const pool = r.combos.filter(([a, b]) => !dead[a] && !dead[b]);
-      if (!pool.length) warnings.push(`No hands left in range "${r.label}" after removing known cards; treated as random.`);
-      return pool.length ? pool : rangeOf('').combos.filter(([a, b]) => !dead[a] && !dead[b]);
+      let pool = poolOf(o, c => dead[c]);
+      if (!pool.length) { warnings.push(`No hands left in ${o.combos ? 'that read' : `range "${rangeOf(o.range).label}"`} after removing known cards; treated as random.`); pool = poolOf({ range: '' }, c => dead[c]); }
+      // cumulative weights for drawing a hand in proportion to its weight
+      const cum = new Float64Array(pool.length); let t = 0; pool.forEach((h, i) => { t += h[2]; cum[i] = t; });
+      pool.cum = cum; pool.total = t;
+      return pool;
     });
+    const drawFrom = pool => { const x = Math.random() * pool.total; let lo = 0, hi = pool.length - 1; while (lo < hi) { const mid = (lo + hi) >> 1; if (pool.cum[mid] > x) hi = mid; else lo = mid + 1; } return pool[lo]; };
     const nOpp = fixed.length + ranged.length;
 
     const paths = new Map(), nowG = new Map(), rivG = new Map();
     let score = 0, weight = 0, noneN = 0, noneW = 0, nowBeat = 0, rivBeat = 0;
-    const bump = (m, k, ord) => { const g = m.get(k); if (g) g.n++; else m.set(k, { label: k, n: 1, ord }); };
-    function record(oppHands, run) {
+    let wt0 = 1; // weight of the deal being recorded
+    const bump = (m, k, ord) => { const g = m.get(k); if (g) g.n += wt0; else m.set(k, { label: k, n: wt0, ord }); };
+    function record(oppHands, run, wt = 1) {
       const full = run.length ? board.concat(run) : board;
       const hv = evalHand(hero.concat(full)); let best = -1, ties = 0, bestNow = -1;
       for (const oc of oppHands) {
         const v = evalHand(oc.concat(full)); if (v > best) { best = v; ties = 1; } else if (v === best) ties++;
         if (heroCur !== null && toCome) { const vn = evalHand(oc.concat(board)); if (vn > bestNow) bestNow = vn; }
       }
-      const w = hv > best ? 1 : hv === best ? 1 / (ties + 1) : 0; score += w; weight++;
-      if (heroCur !== null && toCome && bestNow > heroCur) { nowBeat++; bump(nowG, relLabel(bestNow, heroCur), catOrd(bestNow)); }
-      if (hv < best) { rivBeat++; bump(rivG, relLabel(best, hv), catOrd(best)); }
+      wt0 = wt;
+      const w = hv > best ? 1 : hv === best ? 1 / (ties + 1) : 0; score += w * wt; weight += wt;
+      if (heroCur !== null && toCome && bestNow > heroCur) { nowBeat += wt; bump(nowG, relLabel(bestNow, heroCur), catOrd(bestNow)); }
+      if (hv < best) { rivBeat += wt; bump(rivG, relLabel(best, hv), catOrd(best)); }
       const p = toCome ? pathOf(hero, full, curCat) : null;
-      if (p) { let g = paths.get(p.key); if (!g) { g = { ...p, river: 0, win: 0, flop: 0 }; paths.set(p.key, g); } g.river++; g.win += w; } else { noneN++; noneW += w; }
-      if (board.length === 0) { const pf = pathOf(hero, run.slice(0, 3), curCat); if (pf) { let g = paths.get(pf.key); if (!g) { g = { ...pf, river: 0, win: 0, flop: 0 }; paths.set(pf.key, g); } g.flop++; } }
+      if (p) { let g = paths.get(p.key); if (!g) { g = { ...p, river: 0, win: 0, flop: 0 }; paths.set(p.key, g); } g.river += wt; g.win += w * wt; } else { noneN += wt; noneW += w * wt; }
+      if (board.length === 0) { const pf = pathOf(hero, run.slice(0, 3), curCat); if (pf) { let g = paths.get(pf.key); if (!g) { g = { ...pf, river: 0, win: 0, flop: 0 }; paths.set(pf.key, g); } g.flop += wt; } }
     }
 
     const exact = opts.exact !== false && nOpp <= 1 && toCome <= 1;
     if (exact) {
       const hands = nOpp === 0 ? [null] : fixed.length ? [fixed[0]] : pools[0];
       for (const h of hands) {
-        const used = h ? [h[0], h[1]] : [];
-        if (!toCome) { record(h ? [h] : [], []); continue; }
-        for (let c = 0; c < 52; c++) if (!dead[c] && !used.includes(c)) record(h ? [h] : [], [c]);
+        const used = h ? [h[0], h[1]] : [], opp = h ? [[h[0], h[1]]] : [], wt = h && h.length > 2 ? h[2] : 1;
+        if (!toCome) { record(opp, [], wt); continue; }
+        for (let c = 0; c < 52; c++) if (!dead[c] && !used.includes(c)) record(opp, [c], wt);
       }
     } else {
       const flags = new Uint8Array(52), avail = new Array(52);
@@ -213,8 +225,8 @@
         const hands = fixed.slice();
         for (let i = 0; i < pools.length; i++) {
           const pool = pools[i]; let pick = null;
-          for (let tries = 0; tries < 40 && !pick; tries++) { const h = pool[rnd(pool.length)]; if (!flags[h[0]] && !flags[h[1]]) pick = h; }
-          if (!pick) { const left = pool.filter(([a, b]) => !flags[a] && !flags[b]); pick = left.length ? left[rnd(left.length)] : null; }
+          for (let tries = 0; tries < 40 && !pick; tries++) { const h = drawFrom(pool); if (!flags[h[0]] && !flags[h[1]]) pick = [h[0], h[1]]; }
+          if (!pick) { const left = pool.filter(([a, b]) => !flags[a] && !flags[b]); pick = left.length ? left[rnd(left.length)].slice(0, 2) : null; }
           if (!pick) { const free = []; for (let c = 0; c < 52; c++) if (!flags[c]) free.push(c); shuffle(free); pick = [free[0], free[1]]; }
           flags[pick[0]] = flags[pick[1]] = 1; hands.push(pick);
         }
@@ -241,10 +253,10 @@
     // Per opponent: share of their possible hands that beats you, overall and per group.
     const shares = (opps || []).map(o => {
       if (o.cards && o.cards.length === 2) { const [a, b] = o.cards[0] < o.cards[1] ? o.cards : [o.cards[1], o.cards[0]]; const k = beats.get(a * 52 + b); return { total: 1, by: k ? { [k]: 1 } : {}, beat: k ? 1 : 0 }; }
-      const pool = rangeOf(o.range).combos.filter(([a, b]) => !used.has(a) && !used.has(b));
-      const by = {}; let beat = 0;
-      for (const [a, b] of pool) { const k = beats.get(a * 52 + b); if (k) { by[k] = (by[k] || 0) + 1; beat++; } }
-      return { total: pool.length || 1, by, beat };
+      const pool = poolOf(o, c => used.has(c));
+      const by = {}; let beat = 0, total = 0;
+      for (const [a, b, w] of pool) { total += w; const k = beats.get(a < b ? a * 52 + b : b * 52 + a); if (k) { by[k] = (by[k] || 0) + w; beat += w; } }
+      return { total: total || 1, by, beat };
     });
     const any = fracs => (1 - fracs.reduce((p, f) => p * (1 - f), 1)) * 100;
     g.forEach((x, k) => { x.desc = describeCombos(x.combos); x.pNow = any(shares.map(s => (s.by[k] || 0) / s.total)); x.inRange = shares.some(s => s.by[k]); });
@@ -316,83 +328,53 @@
     const { street, hero, board, eq, live, bb } = ctx;
     const win = eq.chance, need = ctx.toCall > 0 ? ctx.toCall / (ctx.pot + ctx.toCall) * 100 : 0;
     const reasons = [], fmt = x => (x > 0 && x < 0.95 ? 'under 1' : Math.round(x * 10) / 10);
+    const F = ctx.fmt || (x => String(Math.round(x * 100) / 100)); // chip amounts
     const out = (action, t, opts = {}) => {
       const zone = action === 'fold' ? 0 : action === 'check' || action === 'call' ? 1 : action === 'wait' ? 1 : 2;
       const label = { fold: 'Fold', check: 'Check', call: 'Call', bet: 'Bet', raise: 'Raise', wait: 'Your bet stands' }[action];
-      return { action, label, size: opts.size || null, sizeText: opts.sizeText || '', gauge: Math.round((zone + clamp01(t)) / 3 * 100), close: !!opts.close, reasons, note: ctx.rangesSet ? '' : 'Opponents are treated as random hands. Give them a range or style for sharper advice.' };
+      return { action, label, size: opts.size || null, sizeText: opts.sizeText || '', gauge: Math.round((zone + clamp01(t)) / 3 * 100), close: !!opts.close, reasons, note: street === 0 ? '' : ctx.note !== undefined ? ctx.note : ctx.rangesSet ? '' : 'Opponents are treated as random hands. Give them a range or style for sharper advice.' };
     };
     if (!live) { reasons.push('Everyone else has folded: the pot is yours.'); return out('wait', 1); }
 
-    // ---------- preflop: position-based ranges ----------
+    // ---------- preflop: standard charts (strategy.js), worked out by the scenario and passed in as ctx.pre ----------
     if (street === 0) {
-      const label = handLabel(hero[0], hero[1]), top = PCT[label];
-      const [hi, lo] = hero.map(rankOf).sort((a, b) => b - a), suited = suitOf(hero[0]) === suitOf(hero[1]);
-      const spec = hi === lo || (suited && (hi - lo <= 3 || hi === 12));
-      const handTxt = `${label} is in the top ${Math.round(top)}% of starting hands`;
-      if (ctx.aggressor === 'hero') { reasons.push(`You raised to ${ctx.bet}. ${handTxt}.`); return out('wait', clamp01((40 - top) / 40)); }
-      if (ctx.aggressor === 'opp') {
-        const r = ctx.raiserPct, size = ctx.bet / bb, sizeF = Math.max(0.55, Math.min(1.15, 3 / size));
-        let threeBet = Math.max(2, r * 0.22) * sizeF, call = r * 0.65 * sizeF;
-        if (ctx.position === 'BB') call *= 1.35; else if (ctx.position === 'SB') call *= 0.8; else if (ctx.inPosition) call *= 1.15;
-        if (ctx.callers >= 1) { threeBet *= 0.8; call *= spec ? 1.25 : 0.85; }
-        reasons.push(`${ctx.raiserLabel} raised to ${ctx.bet} (${fmt(size)} big blinds), a range of about the top ${Math.round(r)}% of hands.`);
-        reasons.push(`${handTxt}.`);
-        if (top <= threeBet) {
-          const to = roundChips(ctx.bet * (ctx.inPosition ? 3 : 3.8) + ctx.callers * ctx.bet, bb);
-          reasons.push(`That is strong enough to re-raise for value${ctx.inPosition ? ' in position' : ''}.`);
-          return out('raise', clamp01((threeBet - top) / threeBet + 0.3), { size: to, sizeText: `to ${to}` });
-        }
-        if (top <= call || win >= need + 12) {
-          reasons.push(win >= need ? `You win ${fmt(win)}% against them and need ${fmt(need)}% to call.` : `Calling needs ${fmt(need)}%; you have ${fmt(win)}% now, and ${spec ? 'this hand can make strong pairs, straights or flushes' : 'position helps you play the later streets'}.`);
-          if (ctx.position === 'BB') reasons.push('In the big blind you already have chips in, so you can defend wider.');
-          return out('call', clamp01((call - top) / call * 0.8 + 0.2), { close: top > call * 0.8 });
-        }
-        reasons.push(`Too weak to continue against that range${ctx.inPosition ? '' : ' out of position'}.`);
-        return out('fold', clamp01(1 - (top - call) / Math.max(call, 10)), { close: top < call * 1.25 });
-      }
-      // nobody has raised
-      const open = openPct(ctx.behind, ctx.players);
-      if (ctx.position === 'BB') {
-        reasons.push(`${handTxt}. Nobody raised, so you can see the flop for free.`);
-        if (top <= 10) { const to = roundChips(bb * 4 + ctx.callers * bb, bb); reasons.push('Raise to build the pot with a premium hand.'); return out('raise', clamp01((10 - top) / 10 + 0.3), { size: to, sizeText: `to ${to}` }); }
-        return out('check', 0.5);
-      }
-      reasons.push(`From ${ctx.position} players usually open about the top ${open}% of hands; ${handTxt}.`);
-      if (top <= open) {
-        const to = roundChips(bb * (ctx.position === 'SB' ? 3.5 : 3) + ctx.callers * bb, bb);
-        if (ctx.callers) reasons.push(`Raise ${ctx.callers > 1 ? `over ${ctx.callers} limpers` : 'over the limper'} rather than calling.`);
-        return out('raise', clamp01((open - top) / open + 0.25), { size: to, sizeText: `to ${to}` });
-      }
-      if (ctx.position === 'SB' && ctx.callers && top <= 60) { reasons.push('Completing the small blind is cheap with players already in.'); return out('call', 0.3, { close: true }); }
-      if (ctx.callers && spec && top <= open * 2.2) { reasons.push('With limpers in, a speculative hand can call cheaply and hope to hit big.'); return out('call', 0.25, { close: true }); }
-      reasons.push('Not strong enough to play from here.');
-      return out('fold', clamp01(1 - (top - open) / open), { close: top <= open * 1.3 });
+      const p = ctx.pre;
+      if (!p) { reasons.push('Preflop advice needs the table\'s betting.'); return out('wait', 0.5); }
+      p.reasons.forEach(r => reasons.push(r));
+      let action = p.action;
+      if (action === 'call' && !(ctx.toCall > 0)) action = 'check';
+      const o = { close: !!p.close };
+      if (action === 'raise' && p.to) { o.size = p.to; o.sizeText = `to ${F(p.to)}`; }
+      return out(action, p.t, o);
     }
 
     // ---------- flop, turn, river: your chances against what it costs ----------
     const tex = texture(board), draw = drawOuts(hero, board), river = street === 3, made = describe(hero, board);
     const pos = ctx.inPosition ? 'in position' : 'out of position';
     reasons.push(`You win ${fmt(win)}% ${live > 1 ? `against ${live} opponents` : 'against your opponent'}${ctx.rangesSet ? ' (given their likely hands)' : ''}.`);
-    if (ctx.aggressor === 'hero') { reasons.push(`You bet ${ctx.bet}; the stats assume they call.`); return out('wait', clamp01(win / 100)); }
+    if (ctx.aggressor === 'hero') { reasons.push(`You bet ${F(ctx.bet)}; the stats assume they call.`); return out('wait', clamp01(win / 100)); }
     if (ctx.toCall > 0) {
-      reasons.push(`Calling ${ctx.toCall} into ${fmt(ctx.pot)} needs ${fmt(need)}% to break even.`);
-      if (win >= need) {
+      // Equity you actually get to use: out of position you often can't see the next card or get paid when you hit.
+      const realize = river || ctx.inPosition ? 1 : street === 1 ? 0.8 : 0.9, eff = win * realize;
+      reasons.push(`Calling ${F(ctx.toCall)} into ${F(ctx.pot)} needs ${fmt(need)}% to break even.`);
+      if (realize < 1) reasons.push(`Out of position you won't realize all of it: it plays more like ${fmt(eff)}%.`);
+      if (eff >= need) {
         const raiseAt = Math.max(70, need + 35);
         if (win >= raiseAt) {
           const to = roundChips(ctx.bet * (river ? 2.5 : 3) + ctx.pot * 0.2, bb);
           reasons.push(`You're well ahead (${fmt(win)}% vs ${fmt(need)}% needed): raise for value${tex.wet && !river ? ' and charge the draws' : ''}.`);
-          return out('raise', clamp01((win - raiseAt) / 30 + 0.3), { size: to, sizeText: `to ${to}` });
+          return out('raise', clamp01((win - raiseAt) / 30 + 0.3), { size: to, sizeText: `to ${F(to)}` });
         }
-        if (win < need + 5) reasons.push('Only just profitable: a close call.');
+        if (eff < need + 5) reasons.push('Only just profitable: a close call.');
         else if (!river && draw.outs >= 8) reasons.push(`Your ${draw.label} (${draw.outs} cards) adds to your chances.`);
-        return out('call', clamp01((win - need) / Math.max(raiseAt - need, 1)), { close: win < need + 5 });
+        return out('call', clamp01((eff - need) / Math.max(raiseAt - need, 1)), { close: eff < need + 5 });
       }
-      if (!river && draw.outs >= 8 && win >= need * 0.7) {
-        reasons.push(`Slightly short of the price, but your ${draw.label} (${draw.outs} cards) can win a bigger pot later when it hits (implied odds).`);
+      if (!river && draw.outs >= 8 && live <= 2 && eff >= need * 0.85) {
+        reasons.push(`Just short of the price, but your ${draw.label} (${draw.outs} cards) can win a bigger pot later when it hits (implied odds).`);
         return out('call', 0.1, { close: true });
       }
       reasons.push(river ? 'Nothing more can come: the price is too high.' : `Not enough to call${draw.outs ? ` even counting your ${draw.label}` : ''}.`);
-      return out('fold', clamp01(win / need), { close: win >= need * 0.85 });
+      return out('fold', clamp01(eff / need), { close: eff >= need * 0.85 });
     }
     // checked to you (or you act first)
     let valueAt = live === 1 ? (river ? 60 : 56) : Math.max(30, 100 / (live + 1) * 1.5);
@@ -402,12 +384,12 @@
     if (win >= valueAt) {
       reasons.push(`${cap(made.text.replace(/<[^>]+>/g, ''))} is ahead often enough to bet for value (${fmt(win)}% vs about ${Math.round(valueAt)}% needed).`);
       if (tex.wet && !river) reasons.push(`The board has ${tex.words}: bet bigger to make draws pay.`);
-      return out('bet', clamp01((win - valueAt) / 30 + 0.3), { size, sizeText: `${size} (about ${pctPot}% of the pot)` });
+      return out('bet', clamp01((win - valueAt) / 30 + 0.3), { size, sizeText: `${F(size)} (about ${pctPot}% of the pot)` });
     }
     if (!river && draw.outs >= 8 && live <= 2 && !ctx.station) {
       reasons.push(`Your ${draw.label} (${draw.outs} cards) makes a good semi-bluff ${pos}: you can win now, or improve.`);
       const sb = roundChips(ctx.pot * 0.6, bb);
-      return out('bet', 0.15, { size: sb, sizeText: `${sb} (about 60% of the pot)`, close: true });
+      return out('bet', 0.15, { size: sb, sizeText: `${F(sb)} (about 60% of the pot)`, close: true });
     }
     reasons.push(`Not strong enough to bet${live > 1 ? ` into ${live} players` : ''}; check and see what they do${ctx.inPosition ? '' : ''}.`);
     return out('check', clamp01(win / valueAt));
@@ -417,7 +399,7 @@
     RANKS, SUITS, SYM, RN, RP, SN, CATN, DECK, ORDER, PCT, STYLES, B, M,
     rankOf, suitOf, rnd, shuffle, cap, cardFromCode, codeOf, cardText,
     evalHand, cat, describe, preflopShort, pathOf, curCatOf, relLabel, catOrd, handLabel,
-    combosOfClass, parseRange, rangeOf, equity, threatsNow, describeCombos, nextCardGroups, winChanceQuick, handCards,
+    combosOfClass, parseRange, rangeOf, poolOf, equity, threatsNow, describeCombos, nextCardGroups, winChanceQuick, handCards,
     texture, drawOuts, openPct, recommend,
   };
 });
