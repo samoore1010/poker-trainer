@@ -2,11 +2,11 @@
 // the action on each street, and which street is on screen. The table, the stats and the agent all read and write it.
 // Shared by the browser (window.PokerScenario) and the server (require). Cards are codes like "Ah", "Tc".
 (function (root, factory) {
-  const E = typeof module === 'object' && module.exports ? require('./engine.js') : root.PokerEngine;
-  const api = factory(E);
+  const node = typeof module === 'object' && module.exports;
+  const api = factory(node ? require('./engine.js') : root.PokerEngine, node ? require('./strategy.js') : root.PokerStrategy);
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.PokerScenario = api;
-})(typeof self !== 'undefined' ? self : this, function (E) {
+})(typeof self !== 'undefined' ? self : this, function (E, PS) {
   'use strict';
 
   const STREETS = ['preflop', 'flop', 'turn', 'river', 'showdown'];
@@ -26,6 +26,14 @@
   const pretty = c => E.cardText(E.cardFromCode(c));
   const prettyList = cs => (cs && cs.length ? cs.map(pretty).join(' ') : '—');
   const round = x => Math.round(x * 100) / 100;
+  // Chip amounts are shown in dollars or in big blinds (a display setting; the scenario always stores chips).
+  let unit = '$';
+  const setUnit = u => { unit = u === 'bb' ? 'bb' : '$'; return unit; };
+  const getUnit = () => unit;
+  function fmt(sc, x) {
+    if (unit === 'bb') return `${Math.round(x / sc.bigBlind * 10) / 10} BB`;
+    return '$' + round(x).toLocaleString('en-US');
+  }
 
   // Each street is an ordered list of actions: {seat, type: fold|check|call|bet|raise, to}. `to` is the seat's total
   // chips in on that street after the action (bets and raises); replay() turns the list into the whole hand state.
@@ -38,7 +46,7 @@
     const n = clamp(Math.round(num(opts.opponents, 5)), 1, 8), stack = Math.max(1, num(opts.stack, 200)), bb = Math.max(0.02, num(opts.bigBlind, 2));
     const names = E.shuffle(NAMES.slice());
     return {
-      v: 2, bigBlind: bb, button: n - 1, street: 0, deal: Math.floor(Math.random() * 1e9),
+      v: 2, bigBlind: bb, smallBlind: opts.smallBlind != null ? clamp(num(opts.smallBlind, bb / 2), 0, bb) : bb / 2, button: n - 1, street: 0, deal: Math.floor(Math.random() * 1e9),
       hero: { name: 'You', stack, cards: [] },
       opponents: Array.from({ length: n }, (_, i) => ({ ...defaultOpponent(i, stack), name: names[i], stack: opts.randomStacks === false ? stack : stack - 50 + E.rnd(11) * 10 })),
       board: [],
@@ -55,7 +63,7 @@
     const n = opps.length;
     const bb = Math.max(0.02, num(src.bigBlind, 2));
     const sc = {
-      v: 2, bigBlind: bb, button: ((Math.round(num(src.button, n - 1)) % (n + 1)) + n + 1) % (n + 1),
+      v: 2, bigBlind: bb, smallBlind: clamp(num(src.smallBlind, bb / 2), 0, bb), button: ((Math.round(num(src.button, n - 1)) % (n + 1)) + n + 1) % (n + 1),
       street: clamp(Math.round(num(src.street, 0)), 0, 4), deal: Math.round(num(src.deal, 0)),
       hero: { name: 'You', stack: Math.max(0, num(src.hero && src.hero.stack, 200)), cards: [] },
       opponents: [], board: [], streets: [], note: typeof src.note === 'string' ? src.note.slice(0, 500) : '',
@@ -115,12 +123,54 @@
     return Array.from({ length: players }, (_, seat) => names[(seat - sc.button + players) % players]);
   }
   const seatOfPosition = (sc, pos) => positions(sc).indexOf(pos);
-  function blindOf(sc, seat) { const p = positions(sc)[seat]; return p === 'BB' ? sc.bigBlind : p === 'SB' || (p === 'BTN' && sc.opponents.length === 1) ? sc.bigBlind / 2 : 0; }
+  const sbOf = sc => (sc.smallBlind == null ? sc.bigBlind / 2 : sc.smallBlind);
+  function blindOf(sc, seat) { const p = positions(sc)[seat]; return p === 'BB' ? sc.bigBlind : p === 'SB' || (p === 'BTN' && sc.opponents.length === 1) ? sbOf(sc) : 0; }
   const effRange = o => o.range || (o.style && E.STYLES[o.style] !== undefined ? o.style : '') || '';
   function rangeLabel(o) {
     if (o.cards) return `known: ${prettyList(o.cards)}`;
     const r = effRange(o); if (!r) return 'random hand';
     const pr = E.rangeOf(r); return `${o.range ? o.range : o.style} (${round(pr.pct)}% of hands)`;
+  }
+
+  // ----- what each opponent's preflop actions say about their hand -----
+  // An opener holds an opening range for their seat, a caller a calling range, a 3-bettor a 3-bet range, and so on
+  // (charts in strategy.js). Used for the odds whenever you haven't given that player cards, a range or a style.
+  // Returns one entry per seat: {kind, label, range, pct} or null (hasn't acted voluntarily yet).
+  function inferredRanges(sc, m) {
+    m = m || money(sc);
+    const players = sc.opponents.length + 1, pos = positions(sc), { pre } = orders(sc), snap = m.street[0];
+    const out = new Array(players).fill(null);
+    if (!snap) return out;
+    const behind = seat => players - 1 - pre.indexOf(seat);
+    const setPct = seat => { if (seat <= 0) return null; const r = effRange(sc.opponents[seat - 1]); return r ? E.rangeOf(r).pct : null; };
+    let raises = 0, first = null;
+    for (const a of snap.actions) {
+      const p = pos[a.seat], group = p === 'BB' ? 'BB' : p === 'SB' ? 'SB' : 'IP';
+      const vsFirst = { group, raiserBehind: first === null ? 0 : behind(first), raiserPct: setPct(first) };
+      let ev = null;
+      if (a.type === 'raise' || a.type === 'bet') {
+        ev = raises === 0 ? { kind: 'open', behind: behind(a.seat), players } : raises === 1 ? { kind: '3bet', ...vsFirst } : { kind: '4bet' };
+        raises++; if (first === null) first = a.seat;
+      } else if (a.type === 'call') {
+        ev = raises === 0 ? { kind: p === 'SB' ? 'sb-complete' : 'limp' } : raises === 1 ? { kind: 'call-open', ...vsFirst } : { kind: raises === 2 ? 'call-3bet' : 'call-4bet' };
+      } else if (a.type === 'check') ev = { kind: 'bb-check' };
+      if (ev && a.seat > 0) { const r = PS.rangeFor(ev); out[a.seat] = r.range ? { kind: ev.kind, label: r.label, range: r.range, pct: PS.pctOf(r.range) } : null; }
+    }
+    return out;
+  }
+  // The hands an opponent is treated as holding: known cards (null here), your range or style, or what their actions imply.
+  function likelyRange(sc, seat, inf) {
+    const o = sc.opponents[seat - 1];
+    if (o.cards) return null;
+    if (effRange(o)) return effRange(o);
+    const x = (inf || inferredRanges(sc))[seat];
+    return x ? x.range : '';
+  }
+  function seatRangeLabel(sc, seat, inf) {
+    const o = sc.opponents[seat - 1];
+    if (o.cards || effRange(o)) return rangeLabel(o);
+    const x = (inf || inferredRanges(sc))[seat];
+    return x ? `${x.label}: likely about ${Math.round(x.pct)}% of hands` : 'random hand';
   }
 
   // ----- betting: replay the action lists in table order -----
@@ -147,7 +197,7 @@
       const put = (seat, to) => { const add = Math.max(0, Math.min(to - contrib[seat], left(seat))); contrib[seat] += add; total[seat] += add; return contrib[seat]; };
       if (s === 0) {
         const sbSeat = players === 2 ? sc.button : (sc.button + 1) % players, bbSeat = players === 2 ? (sc.button + 1) % 2 : (sc.button + 2) % players;
-        put(sbSeat, bb / 2); put(bbSeat, bb); snap.max = bb;
+        put(sbSeat, sbOf(sc)); put(bbSeat, bb); snap.max = bb;
       }
       const order = s === 0 ? pre : post;
       const inHand = seat => foldedAt[seat] === null;
@@ -201,7 +251,7 @@
     return { streets, frontier, ended, foldedAt, total, potFinal: pot, dropped, pos };
   }
   function actionText(sc, seat, type, to, allIn, s) {
-    const m = x => '$' + round(x);
+    const m = x => fmt(sc, x);
     if (allIn) return `All-in ${m(to)}`;
     if (seat === 0) return { fold: 'Fold', check: 'Check', call: `Call ${m(to)}`, bet: `Bet ${m(to)}`, raise: `Raise to ${m(to)}` }[type];
     return { fold: 'Folds', check: 'Checks', call: `Calls ${m(to)}`, bet: `Bets ${m(to)}`, raise: `Raises to ${m(to)}` }[type];
@@ -332,6 +382,33 @@
     }
   }
 
+  // Takes the betting on street s to `seat`'s turn: back to it if they already acted, otherwise the players in between
+  // fold when they face a bet or it's preflop (how = 'call' makes them call instead), and check when they can.
+  function moveActionTo(sc, s, seat, how = 'fold') {
+    const saved = clone(sc.streets[s]), log = [];
+    delete sc.streets[s].plan;
+    let m = money(sc), snap = m.street[s];
+    if (snap.next === seat) return { ok: true, log };
+    for (let guard = 0; guard < 40; guard++) {
+      m = money(sc); snap = m.street[s];
+      if (m.ended || m.frontier !== s || !snap || snap.complete) break;
+      if (snap.next === seat) return { ok: true, log };
+      const owe = snap.max - snap.contrib[snap.next], type = owe > 0 ? how : 'check';
+      sc.streets[s].actions.push({ seat: snap.next, type, to: 0 });
+      log.push(`${seatName(sc, snap.next)} ${type === 'fold' ? 'folds' : type === 'call' ? 'calls' : 'checks'}`);
+    }
+    // they won't get to act again going forward: take the betting back to their last turn instead
+    sc.streets[s] = clone(saved); delete sc.streets[s].plan;
+    const idx = money(sc).street[s].actions.map(x => x.seat).lastIndexOf(seat);
+    if (idx >= 0) {
+      sc.streets[s].actions = sc.streets[s].actions.slice(0, idx);
+      m = money(sc);
+      if (m.frontier === s && m.street[s].next === seat) return { ok: true, log: ['taken back to their turn'] };
+    }
+    sc.streets[s] = saved;
+    return { ok: false, error: `${seatName(sc, seat)} can't get the action on the ${STREETS[s]} from here${how === 'fold' ? ': everyone before them would fold and end the hand' : ''}.` };
+  }
+
   // A simple computer player for auto-play: plays its actual cards with its style, plus a little randomness.
   // hole/board are card ints. Returns {action: fold|check|call|small|big}.
   function autoAction(sc, seat, hole, board) {
@@ -339,15 +416,21 @@
     const o = seat > 0 ? sc.opponents[seat - 1] : null;
     const owe = snap.max - snap.contrib[seat], pot = snap.pot, rnd = Math.random();
     const style = (o && o.style) || '', loose = /station|fish|maniac|loose|lag/.test(style), aggro = /maniac|lag|aggressive/.test(style);
-    const playPct = o ? (effRange(o) ? Math.max(8, E.rangeOf(effRange(o)).pct) : 35) : 35;
     if (m.frontier === 0) {
-      const top = E.PCT[E.handLabel(hole[0], hole[1])];
-      if (top > playPct) return { action: owe > 0 ? 'fold' : 'check' };
-      const raised = snap.max > sc.bigBlind;
-      if (!raised) return { action: top <= playPct * (aggro ? 0.6 : 0.35) ? (rnd < 0.7 ? 'small' : 'big') : owe > 0 ? 'call' : 'check' };
-      if (top <= playPct * 0.12) return { action: 'small' };
-      if (top <= playPct * (loose ? 0.8 : 0.5)) return { action: 'call' };
-      return { action: 'fold' };
+      // Preflop the computer plays the same charts as the advice (raise or fold, rarely limp), loosened or tightened
+      // by its style: stations and fish call more, maniacs and LAGs raise more, nits and tight players fold more.
+      const c = preflopCtx(sc, seat, hole, m), d = PS.preflop(c), top = E.PCT[c.label];
+      const width = o && effRange(o) ? E.rangeOf(effRange(o)).pct : 25, f = Math.max(0.3, width / 25);
+      const passive = /station|fish/.test(style);
+      let act = d.action;
+      if (act === 'fold' && f > 1 && top <= d.cont * f) act = aggro && rnd < 0.5 ? 'raise' : 'call';
+      else if ((act === 'call' || act === 'raise') && f < 1 && !(o && o.range) && top > d.cont * f) act = 'fold';
+      if (act === 'call' && aggro && rnd < 0.3) act = 'raise';
+      if (act === 'raise' && passive && top > 3 && rnd < 0.5) act = 'call';
+      if (act === 'wait') act = 'call';
+      if (owe <= 0 && (act === 'fold' || act === 'call')) act = 'check';
+      if (act === 'raise') return d.to && d.to > snap.max ? { action: 'raise', amount: d.to } : { action: 'small' };
+      return { action: act };
     }
     const d = E.describe(hole, board), outs = E.drawOuts(hole, board).outs;
     const strong = !d.shared && d.c >= 3, medium = !d.shared && d.c >= 1 && !strong, drawing = outs >= 8;
@@ -386,7 +469,11 @@
         sc.button = off >= 0 ? (n + 1 - off) % (n + 1) : n - 1 >= 0 ? (n + 1 - POS[n + 1].indexOf('BB')) % (n + 1) : 0;
         out.push(`${n} opponent${n > 1 ? 's' : ''}`);
       }
-      if (a.big_blind != null) { sc.bigBlind = Math.max(0.02, num(a.big_blind, sc.bigBlind)); resetAction(sc); out.push(`blinds ${sc.bigBlind / 2}/${sc.bigBlind}`); }
+      if (a.big_blind != null || a.small_blind != null) {
+        if (a.big_blind != null) sc.bigBlind = Math.max(0.02, num(a.big_blind, sc.bigBlind));
+        sc.smallBlind = a.small_blind != null ? clamp(num(a.small_blind, sc.bigBlind / 2), 0, sc.bigBlind) : sc.bigBlind / 2;
+        resetAction(sc); out.push(`blinds ${round(sc.smallBlind)}/${round(sc.bigBlind)}`);
+      }
       if (a.starting_stack != null) { const st = Math.max(1, num(a.starting_stack, 200)); sc.hero.stack = st; sc.opponents.forEach(o => o.stack = st); out.push(`stacks ${st}`); }
       if (a.hero_position) {
         const pos = String(a.hero_position).toUpperCase().replace(/\s+/g, '');
@@ -491,6 +578,24 @@
       }
       return { ok: true, summary: `${cap1(STREETS[s])}: ${seatName(sc, seat)} ${last.text.toLowerCase()}` };
     },
+    // Moves the dealer button to a seat (positions follow); the betting starts over.
+    set_button(sc, a) {
+      const seat = seatFrom(sc, a.seat); if (seat < 0) return { ok: false, error: `Unknown player "${a.seat}". Use a ${SEAT_HELP}, a name, or a position.` };
+      if (seat !== sc.button) { sc.button = seat; resetAction(sc); }
+      return { ok: true, summary: `Dealer button on ${seat === 0 ? 'you' : sc.opponents[seat - 1].name}; you're ${POS_NAMES[positions(sc)[0]] === 'button' ? 'on the button' : `in the ${POS_NAMES[positions(sc)[0]]}`}` };
+    },
+    // Puts the action on a player on the street being bet: if they already acted, it goes back to their turn;
+    // otherwise everyone before them folds (preflop, or facing a bet) or checks.
+    action_to(sc, a) {
+      const seat = seatFrom(sc, a.seat); if (seat < 0) return { ok: false, error: `Unknown player "${a.seat}". Use a ${SEAT_HELP}, a name, or a position.` };
+      const m = money(sc), s = m.frontier;
+      if (m.ended || s > 3) return { ok: false, error: 'The hand is over; deal a new one first.' };
+      if (m.foldedAt[seat] !== null) return { ok: false, error: `${seatName(sc, seat)} has already folded.` };
+      const r = moveActionTo(sc, s, seat, a.passive ? 'call' : 'fold');
+      if (!r.ok) return r;
+      sc.street = s;
+      return { ok: true, summary: `${cap1(STREETS[s])}: action on ${seat === 0 ? 'you' : seatName(sc, seat)}${r.log.length ? ` (${r.log.join(', ')})` : ''}` };
+    },
     show_street(sc, a) {
       const s = streetFrom(a.street); if (s < 0) return { ok: false, error: 'street must be preflop, flop, turn, river or showdown.' };
       for (let k = 0; k < Math.min(s, 4); k++) { if (replay(sc).ended) break; completeStreet(sc, k); }
@@ -511,18 +616,19 @@
   // ----- reading a scenario -----
   // The live opponents at street s as engine inputs.
   function engineOpponents(sc, s) {
-    return liveOpponents(sc, s).map(seat => { const o = sc.opponents[seat - 1]; return o.cards ? { cards: o.cards.map(E.cardFromCode) } : { range: effRange(o) }; });
+    const m = money(sc), inf = inferredRanges(sc, m);
+    return m.liveAfter[Math.min(s, 3)].filter(x => x > 0).map(seat => { const o = sc.opponents[seat - 1]; return o.cards ? { cards: o.cards.map(E.cardFromCode) } : { range: likelyRange(sc, seat, inf) }; });
   }
   // Plain-text description for the agent (and for debugging). Only what you'd know at the table: no hidden cards.
   function summary(sc) {
-    const pos = positions(sc), m = money(sc), view = Math.min(sc.street, 3);
+    const pos = positions(sc), m = money(sc), view = Math.min(sc.street, 3), inf = inferredRanges(sc, m);
     const behind = seat => round(stackOf(sc, seat) - m.contrib[seat]);
     const lines = [];
-    lines.push(`Blinds ${sc.bigBlind / 2}/${sc.bigBlind}. ${sc.opponents.length} opponents. Showing: ${STREETS[sc.street]}.`);
+    lines.push(`Blinds ${round(sbOf(sc))}/${round(sc.bigBlind)}. ${sc.opponents.length} opponents. Dealer button: ${sc.button === 0 ? 'you' : `seat ${sc.button}`}. Showing: ${STREETS[sc.street]}.`);
     lines.push(`Seat 0 You (${pos[0]}): cards ${sc.hero.cards.length ? sc.hero.cards.join(' ') : 'not chosen (random)'}, ${behind(0)} behind${m.foldedAt[0] !== null ? `, FOLDED on the ${STREETS[m.foldedAt[0]]}` : ''}.`);
     sc.opponents.forEach((o, i) => {
       const seat = i + 1, f = m.foldedAt[seat];
-      lines.push(`Seat ${seat} ${o.name} (${pos[seat]}): ${rangeLabel(o)}${o.style && o.range ? `, style ${o.style}` : ''}, ${behind(seat)} behind${f !== null ? `, FOLDED on the ${STREETS[f]}` : ''}${o.note ? `. Note: ${o.note}` : ''}.`);
+      lines.push(`Seat ${seat} ${o.name} (${pos[seat]}): ${seatRangeLabel(sc, seat, inf)}${o.style && o.range ? `, style ${o.style}` : ''}, ${behind(seat)} behind${f !== null ? `, FOLDED on the ${STREETS[f]}` : ''}${o.note ? `. Note: ${o.note}` : ''}.`);
     });
     lines.push(`Board known: ${sc.board.length ? sc.board.join(' ') : 'none yet'}${sc.board.length < BOARD_N[sc.street] ? ` (the rest of the ${STREETS[sc.street]} board is dealt at random)` : ''}.`);
     for (let k = 0; k <= 3; k++) {
@@ -536,35 +642,91 @@
     return lines.join('\n');
   }
 
-  // Collects what the advice rules need from the scenario at street s, then asks the engine.
-  // hero/board are card ints (board = cards visible at s); eq = engine equity result for the same spot.
-  function recommendation(sc, s, hero, board, eq) {
-    const m = money(sc), pos = positions(sc), players = sc.opponents.length + 1, { pre, post } = orders(sc);
-    const snap = m.street[Math.min(s, 3)];
-    if (m.foldedAt[0] !== null) return { action: 'wait', label: 'You folded', gauge: 0, reasons: ['You are out of this hand. Deal a new one, or use Undo to take the fold back.'], note: '' };
-    const live = liveOpponents(sc, s);
-    const inPosition = live.every(x => post.indexOf(0) > post.indexOf(x));
-    const lastAgg = snap ? snap.lastAgg : null;
-    const agg = lastAgg === null ? 'none' : lastAgg === 0 ? 'hero' : 'opp';
-    let raiserPct = 20, raiserLabel = '';
-    if (agg === 'opp') {
-      const o = sc.opponents[lastAgg - 1], r = effRange(o);
-      raiserLabel = `${o.name} (${pos[lastAgg]})`;
-      raiserPct = r ? E.rangeOf(r).pct : E.openPct(players - 1 - pre.indexOf(lastAgg), players);
+  // What the preflop charts need to know about the spot for `seat` (hole = card ints): raises so far, limpers, callers,
+  // who raised and from where, the price and the stack.
+  function preflopCtx(sc, seat, hole, m) {
+    m = m || money(sc);
+    const snap = m.street[0], players = sc.opponents.length + 1, pos = positions(sc), { pre, post } = orders(sc);
+    let raises = 0, first = null, last = null, limpers = 0, callers = 0, sbIn = false;
+    for (const a of snap.actions) {
+      if (a.type === 'raise' || a.type === 'bet') { raises++; if (first === null) first = a.seat; last = a.seat; callers = 0; }
+      else if (a.type === 'call') { if (raises === 0) { limpers++; if (pos[a.seat] === 'SB') sbIn = true; } else if (a.seat !== seat) callers++; }
     }
-    // preflop: players who put chips in voluntarily (calls of the raise, or limps; blinds alone don't count)
-    const callers = s === 0 && snap ? snap.actions.filter(x => x.seat !== 0 && x.seat !== lastAgg && x.type === 'call').length : 0;
-    const ctx = {
-      street: Math.min(s, 3), hero, board, eq, live: live.length, players, position: pos[0], behind: players - 1 - pre.indexOf(0), inPosition,
-      toCall: m.toCall[Math.min(s, 3)], pot: m.potShow[Math.min(s, 3)], bb: sc.bigBlind, aggressor: agg, bet: snap ? snap.max : 0, raiserPct, raiserLabel,
-      callers,
-      station: live.some(x => /station|fish/.test(sc.opponents[x - 1].style || '')),
-      rangesSet: live.some(x => { const o = sc.opponents[x - 1]; return o.cards || effRange(o); }),
+    const info = x => {
+      if (x === null) return null;
+      const r = x > 0 ? effRange(sc.opponents[x - 1]) : '';
+      return { seat: x, behind: players - 1 - pre.indexOf(x), pct: r ? E.rangeOf(r).pct : null, name: seatName(sc, x), pos: pos[x], blind: pos[x] === 'SB' || pos[x] === 'BB' };
     };
-    // "Your bet stands" only while others still have to answer your bet
-    if (agg === 'hero' && snap && snap.complete) ctx.aggressor = 'none';
-    return E.recommend(ctx);
+    return {
+      label: E.handLabel(hole[0], hole[1]), players, pos: pos[seat], behind: players - 1 - pre.indexOf(seat), bb: sc.bigBlind,
+      raises, max: snap.max, toCall: Math.max(0, snap.max - snap.contrib[seat]), stackLeft: Math.max(0, stackOf(sc, seat) - m.contrib[seat]),
+      heroRaisedLast: last === seat && !snap.complete && snap.next !== seat, heroOpened: first === seat, limpers, callers, sbIn,
+      raiser: info(last), inPositionVsRaiser: last !== null && post.indexOf(seat) > post.indexOf(last), fmt: x => fmt(sc, x),
+    };
   }
 
-  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation };
+  // "What you should do" for you at street s. hero/board are card ints (board = cards visible at s); eq = the engine's
+  // equity for the same spot. On your turn it's the advice for this decision; before your turn it's a preview of the
+  // likely decisions ("if it folds to you…", "if someone raises…").
+  function recommendation(sc, s, hero, board, eq) {
+    const m = money(sc);
+    if (m.foldedAt[0] !== null) return { action: 'wait', label: 'You folded', gauge: 0, reasons: ['You are out of this hand. Deal a new one, or use Undo to take the fold back.'], note: '' };
+    if (s === m.frontier && s < 4 && !m.ended && m.next !== null && m.next !== 0) return preview(sc, s, hero, board, eq, m);
+    return advise(sc, s, hero, board, eq, m);
+  }
+  function advise(sc, s, hero, board, eq, m) {
+    const pos = positions(sc), players = sc.opponents.length + 1, { pre, post } = orders(sc), s3 = Math.min(s, 3);
+    const snap = m.street[s3], inf = inferredRanges(sc, m);
+    const live = m.liveAfter[s3].filter(x => x > 0);
+    const inPosition = live.every(x => post.indexOf(0) > post.indexOf(x));
+    const lastAgg = snap ? snap.lastAgg : null;
+    let agg = lastAgg === null ? 'none' : lastAgg === 0 ? 'hero' : 'opp';
+    if (agg === 'hero' && snap && snap.complete) agg = 'none'; // "your bet stands" only while others still have to answer it
+    const set = live.filter(x => { const o = sc.opponents[x - 1]; return o.cards || effRange(o); }).length;
+    const guessed = live.filter(x => !sc.opponents[x - 1].cards && !effRange(sc.opponents[x - 1]) && inf[x]).length;
+    const ctx = {
+      street: s3, hero, board, eq, live: live.length, players, position: pos[0], behind: players - 1 - pre.indexOf(0), inPosition,
+      toCall: m.toCall[s3], pot: m.potShow[s3], bb: sc.bigBlind, aggressor: agg, bet: snap ? snap.max : 0,
+      station: live.some(x => /station|fish/.test(sc.opponents[x - 1].style || '')),
+      rangesSet: set + guessed > 0, fmt: x => fmt(sc, x),
+      note: set + guessed === 0 ? 'Opponents are treated as random hands. Give them a range or style for sharper advice.'
+        : guessed ? 'Opponents\' likely hands are estimated from their preflop actions. Set a range or style on a player to override.' : '',
+    };
+    if (s3 === 0 && snap) ctx.pre = PS.preflop(preflopCtx(sc, 0, hero, m));
+    return E.recommend(ctx);
+  }
+  function preview(sc, s, hero, board, eq, m) {
+    const snap = m.street[s], next = m.next, items = [];
+    const heroActed = snap.actions.some(a => a.seat === 0), heroBet = snap.lastAgg === 0;
+    const isBB = s === 0 && positions(sc)[0] === 'BB';
+    const tryIt = (when, prep) => {
+      const w = clone(sc);
+      if (!prep(w)) return;
+      const mm = money(w);
+      if (mm.ended || mm.frontier !== s || mm.next !== 0) return;
+      items.push({ when: typeof when === 'function' ? when(w, mm) : when, ...advise(w, s, hero, board, eq, mm) });
+    };
+    // 1) the players before you fold (or, in the big blind, just call) or check
+    if (!heroActed) {
+      const passive = isBB && snap.lastAgg === null;
+      tryIt(passive ? 'If everyone just calls' : s > 0 && snap.max === 0 ? 'If it\'s checked to you' : snap.lastAgg === null ? 'If it folds to you' : 'If the rest fold to you',
+        w => moveActionTo(w, s, 0, passive ? 'call' : 'fold').ok);
+    }
+    // 2) the next player bets or raises and the rest fold to you
+    tryIt((w, mm) => { const a = mm.street[s].actions.find(x => x.seat === next && (x.type === 'bet' || x.type === 'raise')); return `If ${seatName(sc, next)} ${a ? a.text.toLowerCase() : 'bets'}`; },
+      w => apply(w, 'act', { seat: next, action: 'small' }).ok && moveActionTo(w, s, 0, 'fold').ok);
+    const main = items[0];
+    const line = it => `${it.when}: ${it.label}${it.sizeText ? ' ' + it.sizeText : ''}${it.close ? ' (close)' : ''}.`;
+    const reasons = [];
+    if (heroBet) reasons.push(`You ${snap.actions.filter(a => a.seat === 0).pop().text.toLowerCase()}; ${seatName(sc, next)} is next to act.`);
+    else reasons.push(`It's ${seatName(sc, next)}'s turn. Here's what to do when the action reaches you:`);
+    items.forEach(it => reasons.push(line(it)));
+    return {
+      action: 'wait', label: heroBet ? 'Your bet stands' : 'Not your turn yet', size: null, sizeText: '', close: false,
+      gauge: main ? main.gauge : 50, reasons, note: main ? main.note : '',
+      preview: items.map(it => ({ when: it.when, action: it.action, label: it.label, size: it.size, sizeText: it.sizeText, close: it.close, gauge: it.gauge, reasons: it.reasons })),
+    };
+  }
+
+  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, setUnit, getUnit, fmt };
 });

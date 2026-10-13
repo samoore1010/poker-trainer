@@ -107,3 +107,51 @@ test('setting a board finishes the betting before it', () => {
   assert.equal(m.street[0].complete, true); assert.equal(sc.street, 1); assert.equal(m.frontier, 1);
   assert.equal(m.potShow[0], 24); // four players in for 6
 });
+
+test('blind sizes', () => {
+  const sc = S.create({ opponents: 5 });
+  assert.ok(S.apply(sc, 'setup_table', { big_blind: 3, small_blind: 1 }).ok);
+  let m = S.money(sc);
+  assert.equal(m.potShow[0], 4);
+  assert.equal(S.blindOf(sc, S.seatOfPosition(sc, 'SB')), 1);
+  S.apply(sc, 'setup_table', { big_blind: 10 }); // a new big blind alone resets the small blind to half
+  assert.equal(sc.smallBlind, 5); assert.equal(S.money(sc).potShow[0], 15);
+  const back = S.normalize(JSON.parse(JSON.stringify(sc))).scenario;
+  assert.equal(back.smallBlind, 5);
+});
+
+test('moving the dealer button moves every position and restarts the betting', () => {
+  const sc = S.create({ opponents: 5 });
+  S.apply(sc, 'act', { action: 'raise', amount: 6 });
+  const r = S.apply(sc, 'set_button', { seat: 0 });
+  assert.ok(r.ok, r.error); assert.match(r.summary, /on the button/);
+  assert.equal(S.positions(sc)[0], 'BTN'); assert.equal(S.positions(sc)[1], 'SB');
+  assert.equal(S.money(sc).street[0].actions.length, 0);
+  assert.ok(S.apply(sc, 'set_button', { seat: 'Nobody' }).ok === false);
+});
+
+test('action to a player: everyone before folds, or it goes back to their turn', () => {
+  const sc = S.create({ opponents: 5 });
+  S.apply(sc, 'setup_table', { hero_position: 'BTN' });
+  const r = S.apply(sc, 'action_to', { seat: 'hero' });
+  assert.ok(r.ok, r.error); assert.equal(S.money(sc).next, 0);
+  assert.equal(S.money(sc).street[0].actions.filter(a => a.type === 'fold').length, 3);
+  S.apply(sc, 'act', { action: 'raise', amount: 5 });
+  assert.ok(S.apply(sc, 'action_to', { seat: 0 }).ok); // already acted: back to your turn
+  assert.equal(S.money(sc).next, 0); assert.equal(S.money(sc).street[0].max, 2);
+  // the big blind can't be reached by folds alone: the hand would end first
+  const sc2 = S.create({ opponents: 5 });
+  assert.equal(S.apply(sc2, 'action_to', { seat: 'BB' }).ok, false);
+  assert.ok(S.apply(sc2, 'action_to', { seat: 'BB', passive: true }).ok);
+});
+
+test('amounts can be shown in big blinds', () => {
+  const sc = S.create({ opponents: 2 });
+  S.setUnit('bb');
+  try {
+    assert.equal(S.fmt(sc, 5), '2.5 BB');
+    S.apply(sc, 'act', { action: 'raise', amount: 6 });
+    assert.match(S.money(sc).street[0].actions[0].text, /3 BB/);
+  } finally { S.setUnit('$'); }
+  assert.equal(S.fmt(sc, 5), '$5');
+});

@@ -12,7 +12,11 @@ A Texas Hold'em trainer. Set up any spot by talking to the coach, picking cards,
 
 - **Scenario** (`public/scenario.js`): one JSON record for the hand: seats, positions, stacks, your cards, the board, each opponent's known cards / range / style, and every action on every street in turn order (`replay()` turns it into pots, whose turn it is and who is still in). The table, the stats and the agent all read and write it.
 - **Engine** (`public/engine.js`): exact 7-card evaluator, range parsing, and equity. Opponents are drawn from their ranges with card removal; with one opponent left on the turn or river every outcome is enumerated (exact), otherwise it simulates 6,000–14,000 deals. Runs in a Web Worker in the browser and in Node on the server.
-- **What you should do** (`recommend` in `engine.js`): a rule-of-thumb gauge at the top of the Read tab. Preflop it compares your hand's starting-hand rank with what players usually open or continue with from your position (and against the raiser's range); after the flop it weighs your win chance against the price, draws, board texture, number of opponents and their styles. Fold / Check · Call / Bet · Raise, with a size and the reasons. It is not a solver.
+- **What you should do** (`strategy.js` preflop, `recommend` in `engine.js` after the flop): a rule-of-thumb gauge at the top of the Read tab, aimed at a disciplined long-run player who folds most hands. It is not a solver.
+  - **Preflop:** standard 100-big-blind charts. Raise first in by seat (about 16% of hands under the gun six-handed, 46% on the button; nobody limps), 3-bet / call / fold against a raise by your seat and the raiser's, tighter with callers in, 4-bet / call / fold against a 3-bet, premiums only against a 4-bet. Limped pots: raise the limpers, overlimp a few suited hands late, complete the small blind, check the big blind.
+  - **After the flop:** your win chance against the price, discounted out of position (you won't see every card or get paid every time you hit): about 80% of it on the flop and 90% on the turn. Draws call only when they're close to the price. Value bets depend on win chance, board texture, number of opponents and calling stations.
+  - **Opponents' hands:** a player you've given cards, a range or a style is played that way. Otherwise their hand is read from what they did preflop: an opener holds that seat's opening range, a caller a calling range, a 3-bettor a 3-bet range, a limper a limping range. Before they act they count as random.
+  - **Before your turn** it previews your decision: *If it folds to you: Raise to $5*, *If UTG raises to $5: Fold*.
 - **Coach agent** (`server/agent/`): an LLM that turns what you say into one `update_table` call (every change at once; it returns fresh stats and the recommendation), plus `calculate` (another street) and `what_if` (compare without changing the table). Each message already carries the current stats, so a plain question needs no tool call. A setup is two model calls; progress streams to the page so the table updates before the written answer arrives. It never invents numbers.
 
 The LLM is the interface, not the calculator. Poker probabilities need exact arithmetic that a model can't do reliably; the engine is exact, fast and free, and the model handles language, setup and explanation.
@@ -36,7 +40,9 @@ Everything is edited right on the table, at any point, without re-dealing; the s
 
 - **Cards:** tap any card spot (your two cards, the five board spots, an opponent's cards). A small picker opens there: tap a rank, then a suit, or just type it (`a` `h`). It moves to the next spot by itself. *Random* puts a spot back to a random card; Backspace does the same, Esc closes.
 - **Street by street:** on preflop, fill the three flop spots and the table moves to the flop (any open preflop betting is finished with checks and calls); then the turn, then the river. Change an earlier card at any time; you stay on the street you're on.
-- **Players:** tap a player's badge or name to set how they play (Nit, Tight, Regular, Loose, Station, Maniac), a range (`Top 15%` or `TT+, AQs+, AKo`), their exact cards, their stack, or *Sit here* to take their seat.
+- **Players:** tap a player's badge or name to set how they play (Nit, Tight, Regular, Loose, Station, Maniac), a range (`Top 15%` or `TT+, AQs+, AKo`), their exact cards, their stack, *Sit here* to take their seat, *Dealer here*, or *Action to them*. Tap your own name for *Dealer here*, *Action to me* and your stack.
+- **Blinds and display:** type the blinds in the top bar (`1/2`, `2/5`, or just `10` for 5/10; presets in the list). The **$ / BB** switch shows every amount in dollars or big blinds (remembered on your device; stacks you type follow it).
+- **Dealer and whose turn:** click the **D** chip to move the dealer button one seat on (positions follow and the betting starts over). *Action to…* puts the action on any player: anyone before them folds (or checks when it's free); if they've already acted, it goes back to their turn. **To me ⏭** in the action bar does that for you.
 - **Say or type it:** the bar at the top understands setups on your device, instantly: *"ace king suited on the button, six handed, flop queen seven deuce rainbow, turn the nine of hearts"*, *"pocket nines in the big blind"*, *"AhKd flop Qs7h2c"*. 🎙 uses the browser's own speech recognition (Chrome, Edge, Safari), so cards land on the table while you're still talking; with no browser speech it records and transcribes on the server. Anything it can't turn into an edit ("make him tighter", "should I call?") goes to the coach.
 
 ## Using the coach
@@ -64,7 +70,7 @@ Betting is played turn by turn in real table order (preflop from under the gun t
 | **Bet pot / Big raise** | a heavy bet: the size of the pot | a heavy raise: pot-sized |
 | **Fold** | give up the hand | give up the hand |
 
-Chips slide in front of each player as they bet and sweep into the pot when the street ends. **Auto ▸** lets the opponents play (each plays its actual cards with its style) until it's your turn; **Play to the flop/turn/river** finishes the betting round (you check/call) and deals the next card. On your turn the button the "What you should do" gauge recommends is starred. Folding ends the hand for you; Undo takes back any action. The stats, the gauge and the coach all use the actual action: who is still in, the pot, what you have to call, who raised and who called.
+Chips slide in front of each player as they bet and sweep into the pot when the street ends. **Auto ▸** lets the opponents play until it's your turn: preflop they play the same charts (raise or fold), loosened or tightened by style (stations and fish call more, maniacs and LAGs raise more); after the flop they play their actual cards with their style. **Play to the flop/turn/river** finishes the betting round (you check/call) and deals the next card. On your turn the button the "What you should do" gauge recommends is starred. Folding ends the hand for you; Undo takes back any action. The stats, the gauge and the coach all use the actual action: who is still in, the pot, what you have to call, who raised and who called.
 
 ## Voice
 
@@ -90,6 +96,7 @@ Opening `public/index.html` straight from disk also works (no coach or server vo
 public/
   index.html         table, card picker, stats panel, coach bar
   engine.js          poker math (shared by browser, worker and server)
+  strategy.js        preflop charts: advice, computer players, opponents' likely ranges (shared)
   scenario.js        the scenario record and the edit operations (shared)
   stats-worker.js    runs the engine off the main thread
   voice.js           HandVoice: recorder + level meter, API client, speak()

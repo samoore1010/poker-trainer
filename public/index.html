@@ -234,6 +234,21 @@
   .spk { padding: 1px 7px; font-size: .9rem; line-height: 1.2; border-color: transparent; background: transparent; }
   .pk-act .note { margin-right: auto; }
 
+  #blindsIn { width: 68px; font: 500 .82rem var(--mono); padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--fg); }
+  .seg2 { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg2 button { border: 0; border-radius: 0; padding: 3px 9px; font: 600 .76rem var(--mono); background: transparent; }
+  .seg2 button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+  .dealer { position: absolute; transform: translate(-50%, -50%); width: 24px; height: 24px; border-radius: 50%; background: #fbfbf6; color: #1b221e; border: 2px solid #c9c4b0; font: 700 .72rem var(--display); display: grid; place-items: center; box-shadow: 0 2px 4px rgba(0,0,0,.45); cursor: pointer; z-index: 3; padding: 0; transition: left .35s ease, top .35s ease; }
+  .dealer:hover { border-color: var(--glow); }
+  .hero .nm { cursor: pointer; }
+  .ab-skip { border: 0; background: none; padding: 0 2px; font: 600 .68rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .ab-btns { display: flex; gap: 8px; }
+  .pv { display: grid; gap: 4px; }
+  .pv-row { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; padding: 5px 8px; border-radius: 6px; background: var(--track); font-size: .82rem; }
+  .pv-row b { font: 700 1rem var(--display); letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; }
+  .pv-row b.bad { color: var(--bad); } .pv-row b.mid { color: var(--warn); } .pv-row b.good { color: var(--good); }
+  .pv-row small { font: 600 .74rem var(--mono); text-transform: none; letter-spacing: 0; }
+
   /* Advisor */
   .advisor { background: var(--panel); border-left: 1px solid var(--line); display: grid; grid-template-rows: auto 1fr; min-height: 0; }
   .tabs { display: flex; border-bottom: 1px solid var(--line); }
@@ -334,6 +349,9 @@
       <p class="note sayNote" id="askNote" hidden aria-live="polite"></p>
     </form>
     <div class="opts">
+      <label for="blindsIn" title="Small blind / big blind. Changing them starts the betting over.">Blinds <input id="blindsIn" list="blindPresets" inputmode="decimal" autocomplete="off" aria-label="Blinds, small / big"></label>
+      <datalist id="blindPresets"><option value="0.5/1"><option value="1/2"><option value="1/3"><option value="2/5"><option value="5/10"><option value="10/20"><option value="25/50"><option value="100/200"></datalist>
+      <span class="seg2" role="group" aria-label="Show amounts in"><button type="button" data-unit="$" aria-pressed="true">$</button><button type="button" data-unit="bb" aria-pressed="false">BB</button></span>
       <label for="nOpp">Opponents <select id="nOpp"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5" selected>5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option></select></label>
       <label><input type="checkbox" id="guessFirst"> Guess first</label>
       <label><input type="checkbox" id="showTerms"> Poker terms</label>
@@ -348,7 +366,7 @@
           <div class="actbar" id="actbar" hidden role="group" aria-label="Choose an action"></div>
           <div class="hero">
             <div class="cards" id="heroCards"></div>
-            <div class="line"><span class="nm">You · <span id="heroPos"></span></span><span class="st" id="heroStack"></span><span class="act you" id="heroAct"></span></div>
+            <div class="line"><span class="nm" id="heroName" title="Click to move the dealer, take the action, or change your stack">You · <span id="heroPos"></span></span><span class="st" id="heroStack"></span><span class="act you" id="heroAct"></span></div>
           </div>
         </div>
       </div>
@@ -377,6 +395,7 @@
 <div class="cardpick seatpop" id="seatpop" hidden role="dialog" aria-label="Edit player"></div>
 <script src="engine.js"></script>
 <script src="setup-parser.js"></script>
+<script src="strategy.js"></script>
 <script src="scenario.js"></script>
 <script src="voice.js"></script>
 <script>
@@ -392,7 +411,7 @@
   const pct = x => Math.round(x) + '%';
   const pct1 = x => x < 1 && x > 0 ? '&lt;1%' : Math.round(x) + '%';
   function odds(p) { if (p >= 85) return 'almost a sure thing'; if (p >= 65) return 'clearly more likely than not'; if (p >= 50) return 'a little better than a coin flip'; if (p >= 40) return 'a little worse than a coin flip'; if (p <= 0.5) return 'almost never'; return `about 1 in ${Math.round(100 / p)}`; }
-  const money = x => '$' + (Math.round(x * 100) / 100).toLocaleString();
+  const money = x => SC.fmt(scenario, x); // dollars or big blinds, per the $ / BB switch
   const isRed = c => suitOf(c) === 1 || suitOf(c) === 2;
   function cardEl(c, cls) { const d = document.createElement('div'); d.className = 'card ' + (isRed(c) ? 'red ' : '') + (cls || ''); d.innerHTML = `<span class="r">${RANKS[rankOf(c)]}</span><span class="s">${SYM[suitOf(c)]}</span>`; return d; }
   const miniCards = cs => `<span class="mini">${cs.map(c => `<span class="${isRed(c) ? 'red' : ''}">${RANKS[rankOf(c)]}${SYM[suitOf(c)]}</span>`).join('')}</span>`;
@@ -408,6 +427,14 @@
   let guesses = store.get('walkthrough.guesses') || [];
   let coachLog = [], lastReply = null;
   const undoStack = [];
+  const num2 = x => String(Math.round(x * 100) / 100);
+  // $ / BB display switch (remembered on this device)
+  function setUnit(u) {
+    SC.setUnit(u); store.set('walkthrough.unit', SC.getUnit());
+    document.querySelectorAll('[data-unit]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.unit === SC.getUnit())));
+    if (hand) { hand.m = SC.money(scenario); renderAll(); if (seatEdit !== null) openSeat(seatEdit); }
+  }
+  SC.setUnit(store.get('walkthrough.unit') === 'bb' ? 'bb' : '$');
 
   // Deals every card the scenario leaves open. Reuses the previous deal's cards where they still fit, so a small edit
   // (say, a new range for one player) doesn't reshuffle the board. Hidden opponent hands are drawn from their ranges.
@@ -454,6 +481,7 @@
     scenario = clean; hand = materialize(scenario, opts.prev === undefined ? hand : opts.prev);
     step = scenario.street; cache = {}; gen++; guessed = {}; counted = {};
     $('nOpp').value = String(scenario.opponents.length);
+    if (document.activeElement !== $('blindsIn')) $('blindsIn').value = `${num2(scenario.smallBlind)}/${num2(scenario.bigBlind)}`;
     commitRevealed(); renderAll();
   }
   function pushUndo() { undoStack.push({ scenario: SC.clone(scenario), hand: { deal: hand.deal, hero: hand.hero.slice(), board: hand.board.slice(), opps: hand.opps.map(o => o.slice()) } }); if (undoStack.length > 30) undoStack.shift(); $('undoBtn').disabled = false; }
@@ -469,7 +497,7 @@
 
   const board = () => hand.board.slice(0, BOARD_N[step]);
   const liveSeats = s => hand.m.liveAfter[Math.min(s, 3)].filter(x => x > 0);
-  const anyRanges = s => liveSeats(s).some(seat => { const o = scenario.opponents[seat - 1]; return o.cards || SC.effRange(o); });
+  const anyRanges = s => liveSeats(s).some(seat => scenario.opponents[seat - 1].cards || SC.likelyRange(scenario, seat));
   function vsLabel(s) { const k = liveSeats(s).length; if (!k) return 'everyone else folded'; return anyRanges(s) ? `vs ${k} opponent${k > 1 ? 's' : ''}' likely hands` : `vs ${k} random hand${k > 1 ? 's' : ''}`; }
   function winners() {
     const full = hand.board, live = [0].concat(liveSeats(3));
@@ -538,6 +566,12 @@
     const p = seatPos(seat), k = narrow.matches ? 0.5 : 0.42;
     return { x: p.x + (50 - p.x) * k, y: p.y + (46 - p.y) * k };
   }
+  // The dealer button sits just inside the seat, off to one side so it doesn't cover the chips.
+  function dealerPos(seat) {
+    if (seat === 0) return { x: 61, y: 74 };
+    const p = seatPos(seat), dx = 50 - p.x, dy = 50 - p.y, d = Math.hypot(dx, dy) || 1;
+    return { x: p.x + dx * 0.26 - dy / d * 6, y: p.y + dy * 0.26 + dx / d * 6 };
+  }
   const heroOut = () => hand.m.foldedAt[0] !== null; // once you fold, the hand is over for you
   const isLive = () => hand.m.frontier === step && step < 4 && !hand.m.ended && !heroOut() && hand.m.next !== null;
   // A seat's latest action on street s, for the label under the player.
@@ -577,7 +611,14 @@
       : turn === 0 ? (m.toCall[step] > 0 ? `Your turn · ${money(m.toCall[step])} to call` : 'Your turn') : heroLast.text || (live ? 'Waiting' : '');
     document.querySelector('.hero').classList.toggle('turn', turn === 0);
     document.querySelectorAll('.seat').forEach(e => e.remove());
-    const tb = $('table');
+    const tb = $('table'), inf = SC.inferredRanges(scenario);
+    // the dealer button: click it to move it one seat on
+    let dEl = $('dealerBtn');
+    if (!dEl) { dEl = document.createElement('button'); dEl.type = 'button'; dEl.id = 'dealerBtn'; dEl.className = 'dealer'; dEl.textContent = 'D'; tb.appendChild(dEl); }
+    const dp = dealerPos(scenario.button);
+    dEl.style.left = dp.x + '%'; dEl.style.top = dp.y + '%';
+    dEl.title = `Dealer button: ${scenario.button === 0 ? 'you' : scenario.opponents[scenario.button - 1].name}. Click to move it to the next seat (the betting starts over).`;
+    dEl.setAttribute('aria-label', dEl.title);
     scenario.opponents.forEach((o, i) => {
       const seat = i + 1, folded = m.foldedAt[seat] !== null && m.foldedAt[seat] <= s3, p = seatPos(seat);
       const s = document.createElement('div'); s.className = 'seat' + (over && w.includes(seat) ? ' win' : '') + (folded ? ' folded' : '') + (turn === seat ? ' turn' : '');
@@ -589,6 +630,7 @@
       const av = document.createElement('div'); av.className = 'av'; av.textContent = h.pos[seat]; av.title = `${SC.POS_NAMES[h.pos[seat]] || ''} · click to edit ${o.name}`; s.appendChild(av);
       const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = o.name; s.appendChild(nm);
       if (SC.effRange(o) || o.note) { const r = document.createElement('div'); r.className = 'rg'; r.textContent = o.range || cap(o.style || '') || ''; r.title = `${SC.rangeLabel(o)}${o.note ? ' — ' + o.note : ''}`; if (r.textContent) s.appendChild(r); }
+      else if (!o.cards && !folded && inf[seat]) { const r = document.createElement('div'); r.className = 'rg'; r.textContent = `~${Math.round(inf[seat].pct)}%`; r.title = `${cap(SC.seatRangeLabel(scenario, seat, inf))}, from what they did. Click the player to set your own read.`; s.appendChild(r); }
       const stEl = document.createElement('div'); stEl.className = 'st'; stEl.textContent = money(behind(seat)); s.appendChild(stEl);
       const act = document.createElement('div');
       if (step === 4) { act.className = 'act' + (folded ? ' fold' : ''); act.textContent = folded ? 'Folded' : describe(h.opps[i], h.board).short; }
@@ -665,7 +707,9 @@
       if (!ch.big.same && !ch.small.allIn) parts.push(btn('big', ch.big.allIn ? 'All-in' : bet ? 'Bet pot' : 'Big raise', ch.big.to, 'big', bet ? 'A heavy bet: the size of the pot' : 'A heavy raise: the size of the pot'));
     }
     const who = you ? 'Your turn' : `${esc(scenario.opponents[seat - 1].name)} · ${hand.pos[seat]}`;
-    bar.innerHTML = `<div class="ab-head"><span>${who}</span>${you ? (rec ? '<span class="ab-tip">★ suggested</span>' : '') : '<button type="button" class="ab-auto" data-auto title="Let the opponents play until it is your turn">Auto ▸</button>'}</div><div class="ab-row">${parts.join('')}</div>`;
+    const snapNow = hand.m.street[step], heroActed = snapNow && snapNow.actions.some(a => a.seat === 0);
+    const skip = heroActed ? '' : '<button type="button" class="ab-skip" data-tome title="Everyone before you folds (or checks when it\'s free) and the action comes to you">To me ⏭</button>';
+    bar.innerHTML = `<div class="ab-head"><span>${who}</span>${you ? (rec ? '<span class="ab-tip">★ suggested</span>' : '') : `<span class="ab-btns">${skip}<button type="button" class="ab-auto" data-auto title="Let the opponents play until it is your turn">Auto ▸</button></span>`}</div><div class="ab-row">${parts.join('')}</div>`;
     bar.hidden = false;
     bar.classList.toggle('you', you);
     const host = narrow.matches ? $('prog') : $('table');
@@ -683,13 +727,14 @@
     const S = sim(step); if (!S) return null;
     try { return SC.recommendation(scenario, step, hand.hero, board(), S); } catch (e) { return null; }
   }
-  function act(action, opts = {}) {
-    const res = SC.apply(scenario, 'act', { action });
+  function act(action, amount) {
+    const res = SC.apply(scenario, 'act', { action, amount });
     if (!res.ok) { console.warn(res.error); return false; }
     loadScenario(scenario); return true;
   }
   $('actbar').addEventListener('click', e => {
     if (e.target.closest('[data-auto]')) { autoPlay({ stopAtHero: true }); return; }
+    if (e.target.closest('[data-tome]')) { autoRun++; const r = edit('action_to', { seat: 0 }); if (!r.ok) coachNote(r.error, true); return; }
     const b = e.target.closest('[data-act]'); if (!b) return;
     autoRun++; pushUndo(); act(b.dataset.act);
   });
@@ -705,7 +750,7 @@
       const seat = m.next;
       if (seat === 0 && stopAtHero && !finishStreet) break;
       const a = seat === 0 ? { action: m.toCall[start] > 0 ? 'call' : 'check' } : SC.autoAction(scenario, seat, hand.opps[seat - 1], hand.board.slice(0, BOARD_N[start]));
-      if (!act(a.action)) break;
+      if (!act(a.action, a.amount)) break;
       await sleep(window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320);
     }
     return run === autoRun;
@@ -840,25 +885,37 @@
       if (!fixedElsewhere(edit_).has(c)) pickCard(c);
     }
   });
-  document.addEventListener('pointerdown', e => { if (edit_ && !e.target.closest('#cardpick') && !e.target.closest('[data-slot]')) closePicker(); if (seatEdit && !e.target.closest('#seatpop') && !e.target.closest('.seat .av, .seat .nm')) closeSeat(); });
+  document.addEventListener('pointerdown', e => { if (edit_ && !e.target.closest('#cardpick') && !e.target.closest('[data-slot]')) closePicker(); if (seatEdit !== null && !e.target.closest('#seatpop') && !e.target.closest('.seat .av, .seat .nm, #heroName')) closeSeat(); });
   narrow.addEventListener('change', () => { if (edit_) renderPicker(); });
 
   // ----- player editor (click a player's badge or name) -----
   const STYLE_CHIPS = [['', 'Random'], ['nit', 'Nit'], ['tight', 'Tight'], ['regular', 'Regular'], ['loose', 'Loose'], ['calling station', 'Station'], ['maniac', 'Maniac']];
   let seatEdit = null;
   function closeSeat() { seatEdit = null; $('seatpop').hidden = true; document.body.classList.toggle('is-editing', edit_ !== null); }
+  const stackShown = x => SC.getUnit() === 'bb' ? Math.round(x / scenario.bigBlind * 10) / 10 : x;
+  const stackFromInput = v => SC.getUnit() === 'bb' ? v * scenario.bigBlind : v;
+  const canActTo = seat => !hand.m.ended && hand.m.frontier <= 3 && hand.m.foldedAt[seat] === null && !heroOut();
   function openSeat(seat) {
-    seatEdit = seat; document.body.classList.add('is-editing'); const o = scenario.opponents[seat - 1], el = $('seatpop'), pos = hand.pos[seat];
-    const rp = SC.effRange(o) ? Math.round(E.rangeOf(SC.effRange(o)).pct) : null;
-    el.innerHTML = `<div class="cp-head"><span>${esc(o.name)} · ${pos}</span><button type="button" class="cp-x" data-sp="close" aria-label="Close">×</button></div>
+    seatEdit = seat; document.body.classList.add('is-editing'); const el = $('seatpop'), pos = hand.pos[seat];
+    const unitL = SC.getUnit() === 'bb' ? 'BB' : '$';
+    const seatBtns = `<button type="button" data-sp="dealer" title="Move the dealer button here (the betting starts over)" ${scenario.button === seat ? 'disabled' : ''}>Dealer here</button><button type="button" data-sp="actto" title="Put the action on this player: anyone before them folds (or checks when it's free)" ${canActTo(seat) && hand.m.next !== seat ? '' : 'disabled'}>Action to ${seat === 0 ? 'me' : 'them'}</button>`;
+    const stackRow = st => `<div class="sp-row"><span class="sp-l">Stack</span><form class="sp-range" data-sp-stack><input name="stack" type="number" min="0" step="any" value="${stackShown(st)}" aria-label="Stack in ${unitL}"><button type="submit">Set ${unitL}</button></form></div>`;
+    if (seat === 0) {
+      el.innerHTML = `<div class="cp-head"><span>You · ${pos}</span><button type="button" class="cp-x" data-sp="close" aria-label="Close">×</button></div>
+        <div class="sp-row sp-btns">${seatBtns}<button type="button" data-sp="mycards">Change cards</button></div>${stackRow(scenario.hero.stack)}`;
+    } else {
+      const o = scenario.opponents[seat - 1], inf = SC.inferredRanges(scenario);
+      const rp = SC.effRange(o) ? Math.round(E.rangeOf(SC.effRange(o)).pct) : null;
+      el.innerHTML = `<div class="cp-head"><span>${esc(o.name)} · ${pos}</span><button type="button" class="cp-x" data-sp="close" aria-label="Close">×</button></div>
       <div class="sp-row"><span class="sp-l">Plays</span><div class="sp-chips">${STYLE_CHIPS.map(([v, l]) => `<button type="button" data-sp-style="${v}" class="${!o.range && (o.style || '') === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
       <div class="sp-row"><span class="sp-l">Range</span><div class="sp-chips">${[8, 15, 25, 40].map(p => `<button type="button" data-sp-range="top ${p}%" class="${o.range === `top ${p}%` ? 'on' : ''}">Top ${p}%</button>`).join('')}</div></div>
       <form class="sp-range" data-sp-form><input name="range" value="${esc(o.range || '')}" placeholder="e.g. TT+, AQs+, AKo" aria-label="Range"><button type="submit">Set</button></form>
-      <p class="note">${o.cards ? `Known cards: ${o.cards.map(c => E.cardText(E.cardFromCode(c))).join(' ')}` : `Holding: ${rp === null ? 'any two cards' : `top ${rp}% of hands`}`}</p>
+      <p class="note">${o.cards ? `Known cards: ${o.cards.map(c => E.cardText(E.cardFromCode(c))).join(' ')}` : rp !== null ? `Holding: top ${rp}% of hands` : inf[seat] ? `Holding: ${esc(SC.seatRangeLabel(scenario, seat, inf))} (from what they did)` : 'Holding: any two cards until they act'}</p>
       <div class="sp-row sp-btns"><button type="button" data-sp="cards">${o.cards ? 'Change cards' : 'Set their cards'}</button>${o.cards ? '<button type="button" data-sp="unknown">Make unknown</button>' : ''}<button type="button" data-sp="sit" title="Move yourself to this seat's position">Sit here</button></div>
-      <div class="sp-row"><span class="sp-l">Stack</span><form class="sp-range" data-sp-stack><input name="stack" type="number" min="1" value="${o.stack}" aria-label="Stack"><button type="submit">Set</button></form></div>`;
+      <div class="sp-row sp-btns">${seatBtns}</div>${stackRow(o.stack)}`;
+    }
     el.hidden = false;
-    const anchor = document.querySelector(`.seat[data-seat="${seat}"] .av`);
+    const anchor = seat === 0 ? $('heroName') : document.querySelector(`.seat[data-seat="${seat}"] .av`);
     if (narrow.matches || !anchor) { el.classList.add('sheet'); el.style.left = el.style.top = ''; return; }
     el.classList.remove('sheet');
     const r = anchor.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight;
@@ -866,9 +923,12 @@
     el.style.top = (r.bottom + 10 + h < innerHeight ? r.bottom + 10 : Math.max(8, r.top - h - 10)) + 'px';
   }
   $('seatpop').addEventListener('click', e => {
-    const b = e.target.closest('button'); if (!b || seatEdit === null) return;
+    const b = e.target.closest('button'); if (!b || seatEdit === null || b.disabled) return;
     const seat = seatEdit;
     if (b.dataset.sp === 'close') return closeSeat();
+    if (b.dataset.sp === 'dealer') { autoRun++; edit('set_button', { seat }); return openSeat(seat); }
+    if (b.dataset.sp === 'actto') { autoRun++; const r = edit('action_to', { seat }); closeSeat(); if (!r.ok) coachNote(r.error, true); return; }
+    if (b.dataset.sp === 'mycards') { closeSeat(); return openPicker({ kind: 'hero', i: 0 }); }
     if ('spStyle' in b.dataset) { edit('set_opponent', { seat, style: b.dataset.spStyle, range: '' }); return openSeat(seat); }
     if (b.dataset.spRange) { edit('set_opponent', { seat, range: b.dataset.spRange }); return openSeat(seat); }
     if (b.dataset.sp === 'cards') { closeSeat(); return openPicker({ kind: 'opp', seat, i: 0 }); }
@@ -879,12 +939,19 @@
     e.preventDefault(); const seat = seatEdit; if (seat === null) return;
     const f = e.target;
     if (f.matches('[data-sp-form]')) { const r = edit('set_opponent', { seat, range: f.range.value }); if (r && !r.ok) { f.range.setCustomValidity(r.error); f.range.reportValidity(); f.range.setCustomValidity(''); return; } }
-    if (f.matches('[data-sp-stack]')) edit('set_opponent', { seat, stack: +f.stack.value });
+    if (f.matches('[data-sp-stack]')) {
+      const v = stackFromInput(+f.stack.value);
+      if (!(v >= 0)) return;
+      if (seat === 0) { pushUndo(); scenario.hero.stack = Math.max(0.01, v); loadScenario(scenario); }
+      else edit('set_opponent', { seat, stack: v });
+    }
     openSeat(seat);
   });
   $('table').addEventListener('click', e => {
     const slot = e.target.closest('[data-slot]');
     if (slot) { closeSeat(); return openPicker(parseSlot(slot.dataset.slot)); }
+    if (e.target.closest('#dealerBtn')) { autoRun++; closeSeat(); closePicker(); edit('set_button', { seat: (scenario.button + 1) % (scenario.opponents.length + 1) }); return; }
+    if (e.target.closest('#heroName')) { closePicker(); return seatEdit === 0 ? closeSeat() : openSeat(0); }
     const who = e.target.closest('.seat .av, .seat .nm');
     if (who) { closePicker(); const seat = +who.closest('.seat').dataset.seat; return seatEdit === seat ? closeSeat() : openSeat(seat); }
   });
@@ -1117,9 +1184,21 @@
     return `<div class="rows r${two ? 2 : 1}" id="threats"><div class="hd"><span>Beaten by</span><span>Now</span>${two ? '<span>By river</span>' : ''}</div>${rows.map((r, i) => row(r).replace('class="row"', i >= LIM ? 'class="row hid"' : 'class="row"')).join('')}</div>` + (extra > 0 ? `<button class="more" data-more="threats" data-n="${extra}">Show ${extra} more</button>` : '');
   }
   // "What you should do": rule-of-thumb advice from position, hand strength, the board and the price (engine.recommend).
+  const ACT_CLS = { fold: 'bad', check: 'mid', call: 'mid', bet: 'good', raise: 'good', wait: 'mid' };
   function adviceBlock(S) {
     const r = SC.recommendation(scenario, step, hand.hero, board(), S);
-    const cls = { fold: 'bad', check: 'mid', call: 'mid', bet: 'good', raise: 'good', wait: 'mid' }[r.action];
+    const cls = ACT_CLS[r.action];
+    if (r.preview) {
+      // not your turn: what to do when the action reaches you
+      const first = r.preview[0];
+      const rows = r.preview.map(p => `<div class="pv-row"><span>${esc(p.when)}</span><b class="${ACT_CLS[p.action]}">${esc(p.label)}${p.sizeText ? ` <small>${esc(p.sizeText)}</small>` : ''}</b></div>`).join('');
+      return `<section class="blk advice ${cls}"><h3>What you should do <small>rule of thumb, not a solver</small></h3>
+        <div class="adv-top"><span class="adv-act">${esc(r.label)}</span></div>
+        <p class="note">${esc(r.reasons[0] || '')}</p>
+        <div class="pv">${rows || '<p class="note">Nothing to decide until the others act.</p>'}</div>
+        ${first ? `<div class="gauge" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${first.gauge}" aria-label="${esc(first.when)}: from fold to raise"><span>Fold</span><span>Check · Call</span><span>Bet · Raise</span><i style="left:${first.gauge}%"></i></div>
+        <ul class="adv-why">${first.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}${r.note ? `<p class="note">${esc(r.note)}</p>` : ''}</section>`;
+    }
     const pot = hand.m.potShow[step];
     const size = !r.size ? '' : r.action === 'raise' ? `to ${money(r.size)}` : `${money(r.size)} · about ${Math.round(r.size / pot * 100)}% of the pot`;
     return `<section class="blk advice ${cls}"><h3>What you should do <small>rule of thumb, not a solver</small></h3>
@@ -1129,7 +1208,8 @@
   }
   function rangeList(s) {
     const seats = liveSeats(s); if (!seats.length) return '';
-    return `<ul class="opps">${seats.map(seat => { const o = scenario.opponents[seat - 1]; return `<li><b>${esc(o.name)}</b> <span class="note">${esc(hand.pos[seat])}</span> ${esc(SC.rangeLabel(o))}</li>`; }).join('')}</ul>`;
+    const inf = SC.inferredRanges(scenario);
+    return `<ul class="opps">${seats.map(seat => { const o = scenario.opponents[seat - 1]; return `<li><b>${esc(o.name)}</b> <span class="note">${esc(hand.pos[seat])}</span> ${esc(SC.seatRangeLabel(scenario, seat, inf))}</li>`; }).join('')}</ul>`;
   }
   function topBlock(S, chance) {
     const h = hand, bd = board(), vs = vsLabel(step);
@@ -1213,6 +1293,18 @@
   $('steps').addEventListener('click', e => { const b = e.target.closest('[data-step]'); if (!b) return; if (+b.dataset.step === step + 1 && isLive()) next(); else go(+b.dataset.step); });
   $('nOpp').addEventListener('change', () => edit('setup_table', { opponents: +$('nOpp').value }));
   $('guessFirst').addEventListener('change', renderPane);
+  // Blinds: "1/2", "2/5", or just the big blind ("10" = 5/10). Changing them starts the betting over.
+  $('blindsIn').addEventListener('change', e => {
+    const el = e.target, mm = el.value.trim().replace(/\$/g, '').match(/^(\d*\.?\d+)\s*(?:[\/\-,: ]\s*(\d*\.?\d+))?$/);
+    const bad = msg => { el.setCustomValidity(msg); el.reportValidity(); el.setCustomValidity(''); };
+    if (!mm) return bad('Type the blinds like 1/2 or 5/10.');
+    const a = +mm[1], b = mm[2] !== undefined ? +mm[2] : null;
+    if (!(Math.max(a, b || 0) > 0)) return bad('The big blind must be more than 0.');
+    autoRun++; edit('setup_table', b === null ? { big_blind: a } : { small_blind: Math.min(a, b), big_blind: Math.max(a, b) });
+    el.blur();
+  });
+  document.querySelectorAll('[data-unit]').forEach(b => b.addEventListener('click', () => setUnit(b.dataset.unit)));
+  setUnit(SC.getUnit());
   $('showTerms').addEventListener('change', () => document.body.classList.toggle('terms', $('showTerms').checked));
   async function speakHand(btn) {
     const chance = chanceFor(step); if (chance === null) return;
