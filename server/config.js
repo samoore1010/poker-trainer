@@ -35,6 +35,9 @@ function loadConfig() {
     vision: {
       provider: str('VISION_PROVIDER').toLowerCase(),
       anthropicModel: str('VISION_MODEL', 'claude-haiku-5-5'),
+      // Sync table (one detailed read of names, stacks and seats, on request): a more careful model by default.
+      syncModel: str('VISION_SYNC_MODEL', 'claude-sonnet-5-5'),
+      openaiSyncModel: str('OPENAI_VISION_SYNC_MODEL'),
       openaiModel: str('OPENAI_VISION_MODEL'),
       timeoutMs: int('VISION_TIMEOUT_MS', 20000),
     },

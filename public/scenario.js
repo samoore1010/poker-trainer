@@ -271,11 +271,33 @@
       if (!groups.has(g)) groups.set(g, { key: g, name: board.length >= 3 ? RG.groupName(g) : g, ord, n: 0, combos: [] });
       const G = groups.get(g); G.n += h[2]; G.combos.push(h);
     }
-    const list = [...groups.values()].sort((x, y) => x.ord - y.ord);
-    list.forEach(G => G.combos.sort((x, y) => y[2] - x[2] || Math.max(y[0], y[1]) - Math.max(x[0], x[1]) || Math.min(y[0], y[1]) - Math.min(x[0], x[1])));
+    // likeliest kind of hand first; "nothing" always last
+    const list = [...groups.values()].sort((x, y) => (x.key === 'air') - (y.key === 'air') || y.n - x.n || x.ord - y.ord);
+    list.forEach(G => { G.combos.sort((x, y) => y[2] - x[2] || Math.max(y[0], y[1]) - Math.max(x[0], x[1]) || Math.min(y[0], y[1]) - Math.min(x[0], x[1])); G.hands = handClasses(G.combos, board); });
     const pct = n / 1326 * 100;
     const summary = kind === 'range' ? `your range: ${o.range} (about ${round(pct)}% of hands)` : `about ${pct >= 10 ? Math.round(pct) : Math.round(pct * 10) / 10}% of hands (${Math.round(n)} combos)`;
     return { kind, combos, n, pct, steps, groups: list, summary, mods: mods.text };
+  }
+  // Combos merged into hands as a player would name them: "A6" (or "A6s" / "A6o" before the flop). A suit is shown only
+  // where it matters: the card helps make or draw to a flush on this board (e.g. "A♥6" when the board has three hearts).
+  // → [{ranks: [hi, lo], suits: [suit|null, suit|null], tag: 's'|'o'|'', count, w (average weight), total}], likeliest first
+  function handClasses(combos, board) {
+    const onBoard = [0, 0, 0, 0]; board.forEach(c => onBoard[E.suitOf(c)]++);
+    const need = board.length >= 5 ? 5 : 4; // a flush, or a flush draw with cards to come
+    const out = new Map();
+    for (const [a, b, w] of combos) {
+      const [hi, lo] = E.rankOf(a) > E.rankOf(b) || (E.rankOf(a) === E.rankOf(b) && E.suitOf(a) > E.suitOf(b)) ? [a, b] : [b, a];
+      const mine = s => (E.suitOf(hi) === s) + (E.suitOf(lo) === s);
+      const suit = c => (board.length >= 3 && onBoard[E.suitOf(c)] + mine(E.suitOf(c)) >= need ? E.suitOf(c) : null);
+      const ranks = [E.rankOf(hi), E.rankOf(lo)], pair = ranks[0] === ranks[1];
+      let suits = board.length >= 3 ? [suit(hi), suit(lo)] : [null, null];
+      if (pair && suits[0] === null && suits[1] !== null) suits = [suits[1], null]; // 6♥6, not 66♥
+      const tag = board.length >= 3 || pair ? '' : E.suitOf(hi) === E.suitOf(lo) ? 's' : 'o';
+      const key = `${ranks.join(',')}|${suits.join(',')}|${tag}`;
+      if (!out.has(key)) out.set(key, { ranks, suits, tag, count: 0, total: 0 });
+      const H = out.get(key); H.count++; H.total += w;
+    }
+    return [...out.values()].map(H => ({ ...H, w: H.total / H.count })).sort((x, y) => y.total - x.total || y.ranks[0] - x.ranks[0] || y.ranks[1] - x.ranks[1]);
   }
   function preflopGroup(a, b) {
     let r1 = E.rankOf(a), r2 = E.rankOf(b); if (r1 < r2) [r1, r2] = [r2, r1];
@@ -763,6 +785,72 @@
     return { stacks, won: won.map(round), showdown: inHand.length > 1, winners, played };
   }
 
+  // ----- matching the table on camera ("Sync table") -----
+  // T = a whole-table reading (server normalizeTable): seats from you, clockwise, the same order as this table's seats.
+  // Only the parts read clearly are offered. → [{id, text}] of what would change on this table.
+  function syncPlan(sc, T) {
+    const out = [];
+    if (!T || !T.readable || !T.readable.seats) return out;
+    const n = T.seats.length - 1, same = n === sc.opponents.length, m = money(sc), r = x => fmt(sc, x);
+    const bb = T.readable.stacks && T.blinds ? T.blinds.big : sc.bigBlind, k = T.unit === 'bb' ? bb : 1;
+    const nameAt = i => (i === 0 ? 'You' : (T.readable.names && T.seats[i].name) || (same ? sc.opponents[i - 1].name : `seat ${i}`));
+    if (T.blinds && (Math.abs(T.blinds.small - sbOf(sc)) > 1e-9 || Math.abs(T.blinds.big - sc.bigBlind) > 1e-9)) out.push({ id: 'blinds', text: `Blinds ${round(sbOf(sc))}/${round(sc.bigBlind)} → ${round(T.blinds.small)}/${round(T.blinds.big)}` });
+    if (!same) out.push({ id: 'players', text: `Players: ${sc.opponents.length + 1} → ${n + 1}` });
+    if (T.readable.names) for (let i = 1; i <= n; i++) {
+      const now = same || i <= sc.opponents.length ? sc.opponents[i - 1].name : '';
+      if (T.seats[i].name && T.seats[i].name !== now) out.push({ id: `name:${i}`, text: now ? `Seat ${i}: ${now} → ${T.seats[i].name}` : `Seat ${i}: ${T.seats[i].name}` });
+    }
+    const d = T.seats.findIndex(x => x.dealer);
+    if (d >= 0 && (d !== sc.button || !same)) out.push({ id: 'dealer', text: `Dealer button: ${d === 0 ? 'you' : nameAt(d)}` });
+    if (T.readable.stacks) for (let i = 0; i <= n; i++) {
+      // the stack at the start of this hand = what's left behind + what this player has put in (as this table has it,
+      // or the chips in front of them when the seats are new)
+      const start = round(T.seats[i].stack * k + (same ? m.contrib[i] : T.seats[i].bet * k)), was = same ? stackOf(sc, i) : null;
+      if (was === null || Math.abs(start - was) > 0.005) out.push({ id: `stack:${i}`, text: `${nameAt(i)}: stack ${was === null ? '' : `${r(was)} → `}${r(start)}` });
+    }
+    return out;
+  }
+  // Applies the picked lines of syncPlan (ids). Players whose names match keep their style, range and notes.
+  function applySync(sc, T, ids) {
+    const pick = new Set(ids), n = T.seats.length - 1, done = [];
+    const bb = T.readable.stacks && T.blinds ? T.blinds.big : sc.bigBlind, k = T.unit === 'bb' ? bb : 1;
+    if (pick.has('blinds')) { apply(sc, 'setup_table', { small_blind: T.blinds.small, big_blind: T.blinds.big }); done.push('blinds'); }
+    const before = money(sc), same = n === sc.opponents.length;
+    if (pick.has('players')) {
+      const old = sc.opponents.slice();
+      apply(sc, 'setup_table', { opponents: n });
+      for (let i = 1; i <= n; i++) {
+        const nm = T.readable.names && T.seats[i].name, match = nm && old.find(o => o.name.toLowerCase() === nm.toLowerCase());
+        if (match) sc.opponents[i - 1] = { ...match, cards: null };
+      }
+      done.push(`${n + 1} players`);
+    }
+    for (let i = 1; i <= n; i++) {
+      if (!pick.has(`name:${i}`)) continue;
+      const nm = T.seats[i].name, o = sc.opponents[i - 1];
+      const j = sc.opponents.findIndex(x => x !== o && x.name.toLowerCase() === nm.toLowerCase());
+      if (j >= 0) { const q = sc.opponents[j]; sc.opponents[i - 1] = { ...q, stack: o.stack }; sc.opponents[j] = { ...o, stack: q.stack }; } // a known player in another seat: their notes and style move with them (stacks are read seat by seat)
+      sc.opponents[i - 1].name = nm.slice(0, 24); done.push(`seat ${i} ${nm}`);
+    }
+    // names must stay unique
+    const seen = new Set(); sc.opponents.forEach((o, i) => { o.name = o.name.trim(); if (seen.has(o.name.toLowerCase())) o.name = `${o.name} ${i + 1}`; seen.add(o.name.toLowerCase()); });
+    if (pick.has('dealer')) { const d = T.seats.findIndex(x => x.dealer); apply(sc, 'set_button', { seat: d }); done.push('dealer'); }
+    for (let i = 0; i <= n; i++) {
+      if (!pick.has(`stack:${i}`)) continue;
+      const v = round(T.seats[i].stack * k + (same && !pick.has('players') ? before.contrib[i] : T.seats[i].bet * k));
+      if (i === 0) sc.hero.stack = v; else sc.opponents[i - 1].stack = v;
+      done.push(`${i === 0 ? 'your' : sc.opponents[i - 1].name + "'s"} stack`);
+    }
+    return done;
+  }
+  // The betting part of a whole-table reading in the form followBetting reads, using this table's positions.
+  function syncBetting(sc, T) {
+    if (!T.readable.betting || T.seats.length !== sc.opponents.length + 1) return null;
+    const pos = positions(sc), seats = {};
+    T.seats.forEach((x, i) => { seats[pos[i]] = { folded: x.folded, bet: x.bet, last: x.last }; });
+    return { players: pos.length, heroPosition: pos[0], toAct: T.toAct === null ? null : pos[T.toAct], unit: T.unit, seats };
+  }
+
   // ----- following the betting a camera saw -----
   // seen: {players, heroPosition, toAct, unit, seats: {POS: {folded, bet (chips in on this street), last}}}; street = the
   // street the picture shows (0 preflop … 3 river). On a copy, plays the actions this table is missing, in turn order:
@@ -932,5 +1020,5 @@
     };
   }
 
-  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, readOf, engineOpponent, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, followBetting, settleHand, setUnit, getUnit, fmt };
+  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, readOf, engineOpponent, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, followBetting, settleHand, syncPlan, applySync, syncBetting, setUnit, getUnit, fmt };
 });

@@ -242,3 +242,32 @@ test('your face-down cards say nothing about anyone\'s range', () => {
   sc.heroHidden = true;
   assert.match(S.summary(sc), /not known yet/);
 });
+
+test('sync table: offers only what was read clearly, applies picked lines, keeps known players', () => {
+  const sc = S.create({ opponents: 2, stack: 100, randomStacks: false });
+  sc.opponents[0].name = 'Ravi'; sc.opponents[0].style = 'maniac'; sc.opponents[1].name = 'Greta';
+  const seat = (name, stack, dealer = false) => ({ name, stack, dealer, folded: false, bet: 0, last: 'none' });
+  const T = { readable: { cards: true, seats: true, names: true, stacks: true, betting: false }, problems: [], unit: 'chips', blinds: null,
+    seats: [{ ...seat('You', 79), bet: 1, last: 'post' }, { ...seat('Ravi', 118), bet: 2, last: 'post' }, seat('Lena', 60), seat('Greta', 90, true)], toAct: 2, board: [], hero: null }; // you SB, Ravi BB
+  const plan = S.syncPlan(sc, T), ids = plan.map(x => x.id);
+  assert.ok(ids.includes('players') && ids.includes('dealer') && ids.includes('name:2') && ids.includes('stack:0'));
+  S.applySync(sc, T, ids);
+  assert.deepEqual(sc.opponents.map(o => o.name), ['Ravi', 'Lena', 'Greta']);
+  assert.equal(sc.opponents[0].style, 'maniac'); // Ravi kept his read
+  assert.equal(sc.button, 3);
+  assert.deepEqual([sc.hero.stack, ...sc.opponents.map(o => o.stack)], [80, 120, 60, 90]); // a new seating: no chips in yet
+  assert.equal(S.syncPlan(sc, T).length, 0); // now in sync
+  // a known player seen in another seat brings their read along; stacks stay seat by seat
+  sc.opponents[2].note = 'tells: shakes when strong';
+  const T3 = { ...T, seats: [T.seats[0], { ...T.seats[3], name: 'Greta' }, T.seats[2], { ...T.seats[1], name: 'Ravi', dealer: true }] };
+  T3.seats[1] = { ...T3.seats[1], dealer: false, stack: 118, bet: 2, last: 'post' }; T3.seats[3] = { ...T3.seats[3], stack: 90, bet: 0, last: 'none' };
+  S.applySync(sc, T3, S.syncPlan(sc, T3).map(x => x.id));
+  assert.deepEqual(sc.opponents.map(o => o.name), ['Greta', 'Lena', 'Ravi']);
+  assert.equal(sc.opponents[0].note, 'tells: shakes when strong'); assert.equal(sc.opponents[2].style, 'maniac');
+  assert.deepEqual(sc.opponents.map(o => o.stack), [120, 60, 90]);
+  // unreadable stacks are not offered
+  const T2 = { ...T, readable: { ...T.readable, stacks: false }, seats: T.seats.map(x => ({ ...x, stack: 5 })) };
+  assert.equal(S.syncPlan(sc, T2).filter(x => x.id.startsWith('stack')).length, 0);
+  // seats unreadable: nothing at all
+  assert.equal(S.syncPlan(sc, { ...T, readable: { ...T.readable, seats: false } }).length, 0);
+});

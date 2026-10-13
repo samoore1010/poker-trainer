@@ -215,3 +215,17 @@ test('vision: betting is passed through only when it adds up', () => {
   assert.equal(normalizeVision({ board: [], hero: [], unsure: [], betting: { readable: true, players: 3, hero_position: 'BB', to_act: 'BB', unit: 'chips', seats } }).betting, null);
   assert.equal(normalizeVision({ board: [], hero: [], unsure: [], betting: { readable: true, players: 2, hero_position: 'BB', to_act: 'CO', unit: 'chips', seats } }).betting, null);
 });
+
+test('vision: whole-table reading is strict about what it could read', () => {
+  const { normalizeTable } = require('../server/vision');
+  const seat = (o = {}) => ({ name: 'A', stack: 100, dealer: false, folded: false, in_front: 0, last_action: 'none', ...o });
+  const ok = normalizeTable({ readable: { cards: true, seats: true, names: true, stacks: true, betting: true }, problems: [], unit: 'chips', small_blind: 0.5, big_blind: 1,
+    seats: [seat({ name: 'You' }), seat({ name: 'B', dealer: true, in_front: 2, last_action: 'raise' })], to_act: 0, board: ['As', 'Kd', '2c'], hero: ['Qh', 'Qs'] });
+  assert.deepEqual(ok.blinds, { small: 0.5, big: 1 }); assert.equal(ok.toAct, 0); assert.equal(ok.seats[1].bet, 2);
+  assert.ok(ok.readable.seats && ok.readable.stacks && ok.readable.betting);
+  const bad = normalizeTable({ readable: { cards: true, seats: true, names: true, stacks: true, betting: true }, problems: [], unit: 'chips', small_blind: 0, big_blind: 0,
+    seats: [seat({ name: '' }), seat({ stack: -1 })], to_act: -1, board: [], hero: [] });
+  assert.equal(bad.readable.seats, false); // no dealer button seen
+  assert.equal(bad.readable.betting, false); assert.equal(bad.readable.names, false); assert.equal(bad.readable.stacks, false);
+  assert.ok(bad.problems.length >= 1); assert.equal(bad.blinds, null);
+});

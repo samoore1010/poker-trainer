@@ -96,12 +96,12 @@ test('streams progress, the new table, then the answer', async () => {
 
 test('camera reading on Claude: image in, structured cards out, Haiku by default', async () => {
   seen = [];
-  const config = { ...cfg({ anthropicKey: 'sk-ant-test', anthropicBaseUrl: url }), vision: { anthropicModel: 'claude-haiku-5-5' } };
+  const config = { ...cfg({ anthropicKey: 'sk-ant-test', anthropicBaseUrl: url }), vision: { anthropicModel: 'claude-haiku-5-5', syncModel: 'claude-sonnet-5-5' } };
   const srv = http.createServer(createApp(config, { log: () => {} }));
   await new Promise(r => srv.listen(0, '127.0.0.1', r));
   try {
     const status = await (await fetch(`http://127.0.0.1:${srv.address().port}/api/status`)).json();
-    assert.deepEqual(status.vision, { provider: 'anthropic', model: 'claude-haiku-5-5' });
+    assert.deepEqual(status.vision, { provider: 'anthropic', model: 'claude-haiku-5-5', syncModel: 'claude-sonnet-5-5' });
     const image = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==';
     const r = await fetch(`http://127.0.0.1:${srv.address().port}/api/cards/vision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image }) });
     const j = await r.json();
@@ -111,5 +111,13 @@ test('camera reading on Claude: image in, structured cards out, Haiku by default
     assert.equal(sent.model, 'claude-haiku-5-5');
     assert.equal(sent.output_config.format.type, 'json_schema');
     assert.deepEqual(sent.messages[0].content[0].source, { type: 'base64', media_type: 'image/jpeg', data: '/9j/4AAQSkZJRgABAQ==' });
+    // Sync table: one careful read with the larger model; whatever comes back is checked part by part
+    seen = [];
+    const t = await fetch(`http://127.0.0.1:${srv.address().port}/api/cards/table`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image }) });
+    const tj = await t.json();
+    assert.equal(t.status, 200, JSON.stringify(tj));
+    const ts = seen.find(x => x.url.startsWith('/v1/messages')).body;
+    assert.equal(ts.model, 'claude-sonnet-5-5'); assert.ok(ts.output_config.format.schema.properties.seats);
+    assert.equal(tj.readable.seats, false); assert.equal(tj.model, 'claude-sonnet-5-5');
   } finally { srv.close(); }
 });

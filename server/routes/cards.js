@@ -2,7 +2,7 @@
 // Turns free-form speech ("pocket rockets, both black, flop is three hearts: king ten two") into exact cards.
 const { HttpError, readJson } = require('../http');
 const { DEAL_SCHEMA, normalizeDeal } = require('../lib/cards');
-const { normalize: normalizeVision } = require('../vision');
+const { normalize: normalizeVision, normalizeTable } = require('../vision');
 
 const SYSTEM = [
   'You convert a spoken or typed description of a Texas Hold\'em hand into exact cards.',
@@ -36,5 +36,16 @@ module.exports = function cardRoutes(router, { openai, vision }) {
     const started = Date.now();
     const raw = await vision.read({ data: m[2], mime: m[1], player: typeof player === 'string' ? player.slice(0, 300) : '', betting: betting === true });
     send.json(200, { ...normalizeVision(raw), provider: vision.name, model: vision.model, ms: Date.now() - started });
+  });
+
+  // POST {image, player?} → the whole table, seat by seat (normalizeTable), for "Sync table". One careful read on request.
+  router.post('/api/cards/table', { metered: true }, async (req, res, { send }) => {
+    if (!vision) throw new HttpError(503, 'vision_not_configured', 'Camera reading needs ANTHROPIC_API_KEY or OPENAI_API_KEY on the server.');
+    const { image, player } = await readJson(req, 3 * 1024 * 1024);
+    const m = typeof image === 'string' && image.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
+    if (!m) throw new HttpError(400, 'image_required', 'Send {"image": "data:image/jpeg;base64,..."}.');
+    const started = Date.now();
+    const raw = await vision.readTable({ data: m[2], mime: m[1], player: typeof player === 'string' ? player.slice(0, 300) : '' });
+    send.json(200, { ...normalizeTable(raw), provider: vision.name, model: vision.syncModel, ms: Date.now() - started });
   });
 };
