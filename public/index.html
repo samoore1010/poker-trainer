@@ -284,6 +284,12 @@
   .cam-read { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-size: .8rem; min-height: 22px; }
   .cam-read b { font: 600 .66rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-right: 3px; }
   .campanel .note { margin: 0; }
+  .cam-reread { padding: 2px 8px; font-size: .74rem; }
+  .cam-ai { margin-left: auto; }
+  .cam-conflict { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 6px 8px; border-radius: 6px; background: color-mix(in srgb, var(--warn) 18%, transparent); font-size: .78rem; }
+  .cam-btns { display: inline-flex; gap: 6px; margin-left: auto; }
+  .cam-conflict b { font: 700 .82rem var(--body); letter-spacing: 0; text-transform: none; color: var(--fg); margin: 0; }
+  .cam-btns button { padding: 3px 9px; font-size: .74rem; }
   @media (max-width: 860px) { .campanel { left: 0; right: 0; bottom: 0; width: auto; border-radius: 14px 14px 0 0; padding-bottom: max(10px, env(safe-area-inset-bottom)); } .cam-view { aspect-ratio: auto; height: 22vh; } }
 
   /* Advisor */
@@ -432,7 +438,7 @@
   </div>
 </div>
 <div class="campanel" id="campanel" hidden role="dialog" aria-label="Camera">
-  <div class="cam-head"><span><i class="cam-dot" id="camDot"></i>Camera</span><label title="Put the cards the camera reads on this table"><input type="checkbox" id="camAuto" checked> Update the table</label><button type="button" class="cp-x" id="camClose" aria-label="Close camera">×</button></div>
+  <div class="cam-head"><span><i class="cam-dot" id="camDot"></i>Camera</span><label title="Put the cards the camera reads on this table"><input type="checkbox" id="camAuto" checked> Update the table</label><button type="button" class="cam-reread" id="camReread" title="Unlock the cards and read the table from scratch">Re-read</button><button type="button" class="cp-x" id="camClose" aria-label="Close camera">×</button></div>
   <div class="cam-view" id="camView"><video id="camVideo" playsinline muted autoplay></video><canvas id="camOverlay"></canvas></div>
   <div class="cam-read" id="camRead"></div>
   <p class="note" id="camNote">Starting the camera…</p>
@@ -910,6 +916,7 @@
   function pickCard(c) {
     const s = edit_; if (!s) return;
     const next = applyCard(s, c);
+    if (cam.stream && cam.lock) { syncLock(); if (s.kind === 'hero') cam.lock.hero = true; if (s.kind === 'board') cam.lock.board = scenario.board.length; renderCamRead(); } // a card you picked counts as confirmed
     if (next) openPicker(next); else closePicker();
   }
   $('cardpick').addEventListener('click', e => {
@@ -1010,11 +1017,128 @@
   $('pickBtn').addEventListener('click', () => openPicker({ kind: 'hero', i: 0 }));
 
   // ----- camera: read the cards on another table (or another screen running this app) -----
-  // vision.js finds the cards in each frame. A reading is applied only after it's been the same for a few frames in
-  // a row, and through the same edits as tapping a card: your two cards, then the board (which moves to that street).
-  const cam = { stream: null, timer: 0, busy: false, seen: [], applied: '', canvas: null, last: null };
+  // 1. Lock-in. Within a hand your two cards never change and the board only grows (flop, then turn, then river), so a
+  //    confirmed card stays put. Only a new hand unlocks it (the board cleared or two new cards), or you: "Use the
+  //    camera's" when it disagrees with the table, "Re-read" to start over. Cards you pick by hand count as confirmed.
+  // 2. Change detection. Every frame the on-device reader (vision.js) proposes cards, and a small grey thumbnail shows
+  //    whether the picture changed and has settled.
+  // 3. Hybrid reading. When something changed and the server has a vision model, a frame goes to the model; its reading
+  //    is checked against the on-device one: they agree → apply; they disagree → ask once more and go with the majority.
+  //    Without a vision model (or while it's failing) the on-device reading alone is applied once it holds steady.
+  const cam = { stream: null, timer: 0, canvas: null, four: false, seen: [], local: null, localKey: '', localSince: 0, lock: null,
+    prevThumb: null, thumbNow: null, asked: null, askedLocal: '', still: 0, ai: { busy: false, last: 0, calls: 0, fails: 0, offUntil: 0 }, conflict: null, ignore: '' };
   const cardsTxt = cs => cs.map(c => E.cardText(E.cardFromCode(c))).join(' ');
+  const sameCards = (a, b) => !!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]);
+  const readKey = r => `${r.hero ? r.hero.join(' ') : '-'}|${r.board ? r.board.join(' ') : '?'}`;
+  // Two readings agree when nothing both of them saw differs (one may see more of the board than the other).
+  function compatible(a, b) {
+    if (a.hero && b.hero && !sameCards(a.hero, b.hero)) return false;
+    if (a.board && b.board) for (let i = 0; i < Math.min(a.board.length, b.board.length); i++) if (a.board[i] !== b.board[i]) return false;
+    return true;
+  }
   function camNote(text, err) { const n = $('camNote'); n.textContent = text; n.classList.toggle('err', !!err); }
+  const aiReady = () => HV && HV.api.has('vision') && Date.now() > cam.ai.offUntil;
+
+  // ----- 1. lock-in -----
+  function syncLock() { if (!cam.lock || cam.lock.deal !== hand.deal) { cam.lock = { deal: hand.deal, hero: false, board: 0 }; cam.conflict = null; } cam.lock.board = Math.min(cam.lock.board, scenario.board.length); }
+  const lockedHero = () => (cam.lock.hero ? scenario.hero.cards.slice() : null);
+  const lockedBoard = () => scenario.board.slice(0, cam.lock.board);
+  function isNewHand(r) {
+    if (!r.hero) return false;
+    const h = lockedHero(), b = lockedBoard();
+    if (h && r.hero.every(c => !h.includes(c))) return true; // two new cards
+    return b.length > 0 && !!r.board && r.board.length === 0 && !sameCards(r.hero, h); // the board was cleared
+  }
+  // What a reading would change: fill what isn't confirmed yet; anything that contradicts a confirmed card is a conflict.
+  function planFor(r) {
+    syncLock();
+    const p = { newHand: isNewHand(r), hero: null, board: null, conflict: null };
+    const h = p.newHand ? null : lockedHero(), b = p.newHand ? [] : lockedBoard();
+    if (r.hero) { if (!h) p.hero = r.hero; else if (!sameCards(r.hero, h)) p.conflict = { kind: 'hero', cards: r.hero, was: h }; }
+    if (r.board && r.board.length) {
+      const n = Math.min(r.board.length, b.length);
+      if (!sameCards(r.board.slice(0, n), b.slice(0, n))) p.conflict = p.conflict || { kind: 'board', cards: r.board, was: b };
+      else if (r.board.length > b.length) p.board = r.board;
+    }
+    p.changes = !!(p.newHand || p.hero || p.board);
+    return p;
+  }
+  function applyPlan(p) {
+    autoRun++; closePicker(); const done = [];
+    if (p.newHand) { newHand(); syncLock(); done.push('new hand'); }
+    if (p.hero) { if (!sameCards(p.hero, scenario.hero.cards)) edit('set_hero_cards', { cards: p.hero }); syncLock(); cam.lock.hero = true; done.push(`your cards ${cardsTxt(p.hero)}`); }
+    if (p.board) {
+      const x = edit('set_board', { cards: p.board });
+      if (x.ok) { syncLock(); cam.lock.board = p.board.length; const t = BOARD_N.indexOf(p.board.length); if (step > t) go(t); done.push(`${['', '', '', 'flop', 'turn', 'river'][p.board.length]} ${cardsTxt(p.board)}`); }
+    }
+    return done;
+  }
+  // A reading that both sources (or the majority) settled on: apply what it fills, flag what it contradicts.
+  function decide(r, src) {
+    const p = planFor(r);
+    if (!p.conflict) cam.conflict = null; // the camera agrees with the table again
+    if (p.conflict) { const k = readKey({ hero: p.conflict.kind === 'hero' ? p.conflict.cards : null, board: p.conflict.kind === 'board' ? p.conflict.cards : null }); if (k !== cam.ignore) cam.conflict = { ...p.conflict, key: k }; }
+    if (!p.changes) { if (!p.conflict) camNote('The table matches what the camera sees.'); renderCamRead(); return; }
+    if (!$('camAuto').checked) { camNote('There\'s something new. Turn on "Update the table" to apply it.'); renderCamRead(); return; }
+    const done = applyPlan(p);
+    camNote(`${src === 'ai' ? 'AI-checked' : 'Camera'}: ${done.join(', ')}.`);
+    renderCamRead();
+  }
+
+  // ----- 2. change detection -----
+  // A 96×54 grey thumbnail: "settled" once the picture holds still for a few frames, "changed" when enough of it
+  // differs from the picture last sent to the AI (a card dealt, cards swept away).
+  function updateThumb(px, w, h) {
+    // block averages (a one-step canvas shrink would sample a few pixels and turn sensor noise into "motion")
+    const W = 96, H = 54, sum = new Float32Array(W * H), cnt = new Float32Array(W * H), cur = new Uint8Array(W * H);
+    for (let y = 0; y < h; y += 2) { const ty = Math.min(H - 1, (y * H / h) | 0); for (let x = 0; x < w; x += 2) { const i = (y * w + x) * 4, t = ty * W + Math.min(W - 1, (x * W / w) | 0); sum[t] += (px[i] * 77 + px[i + 1] * 150 + px[i + 2] * 29) >> 8; cnt[t]++; } }
+    for (let i = 0; i < W * H; i++) cur[i] = cnt[i] ? sum[i] / cnt[i] : 0;
+    let motion = 0; if (cam.prevThumb) for (let i = 0; i < cur.length; i++) motion += Math.abs(cur[i] - cam.prevThumb[i]);
+    motion = cam.prevThumb ? motion / cur.length : 255;
+    cam.prevThumb = cur; cam.thumbNow = cur;
+    cam.still = motion < 2.5 ? cam.still + 1 : 0;
+    let changed = !cam.asked;
+    if (cam.asked) { let n = 0; for (let i = 0; i < cur.length; i++) if (Math.abs(cur[i] - cam.asked[i]) > 28) n++; changed = n >= 6; }
+    return { settled: cam.still >= 3, changed };
+  }
+
+  // ----- 3. the AI check -----
+  async function readWithAI() {
+    const image = cam.canvas.toDataURL('image/jpeg', 0.85);
+    const a = await HV.api.request('/api/cards/vision', { body: JSON.stringify({ image }), headers: { 'Content-Type': 'application/json' } });
+    cam.ai.calls++; cam.ai.model = a.model;
+    if (!a.hero && !a.board) return null;
+    return { hero: a.hero || null, board: a.board, unsure: a.unsure || [] };
+  }
+  async function askAI() {
+    cam.ai.busy = true; cam.asked = cam.thumbNow; cam.askedLocal = cam.local ? readKey(cam.local) : '';
+    try {
+      let first = null;
+      for (let round = 0; round < 2; round++) {
+        cam.ai.last = Date.now();
+        camNote(round ? 'The AI and the camera disagree: checking again…' : 'Checking with the AI…');
+        const local = cam.local && Date.now() - cam.localAt < 2000 ? cam.local : null;
+        const A = await readWithAI();
+        cam.ai.fails = 0;
+        if (!A) { camNote('The AI couldn\'t read the cards clearly. Hold steady.'); cam.asked = null; return; }
+        if (!first && local && !compatible(A, local)) { first = A; continue; }
+        let final = A;
+        if (first) { // three readings: go with the majority
+          if (compatible(first, A) || (local && compatible(local, A))) final = A;
+          else if (local && compatible(local, first)) final = first;
+          else { camNote('The readings disagree. Hold steady and it will try again.'); cam.asked = null; return; }
+        }
+        decide(final, 'ai');
+        return;
+      }
+    } catch (e) {
+      cam.ai.fails++;
+      if (e.status === 503 || cam.ai.fails >= 2) cam.ai.offUntil = Date.now() + 30000; // fall back to the camera alone for a while
+      camNote(`AI check failed (${e.message}). Using the camera's own reading for now.`, true);
+    } finally { cam.ai.busy = false; renderCamRead(); }
+  }
+
+  // ----- the camera loop -----
   async function startCamera() {
     $('campanel').hidden = false; camNote('Starting the camera… allow access if your browser asks.');
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camNote(window.isSecureContext ? 'This browser has no camera access.' : 'The camera needs a secure (https) page.', true); return; }
@@ -1026,10 +1150,11 @@
       return;
     }
     const v = $('camVideo'); v.srcObject = cam.stream; try { await v.play(); } catch (e) {}
-    $('camDot').classList.add('on'); cam.seen = []; cam.applied = ''; cam.four = false;
+    $('camDot').classList.add('on');
+    Object.assign(cam, { seen: [], four: false, local: null, lock: null, asked: null, prevThumb: null, conflict: null, ignore: '' });
     camNote('Point it at the table so the cards fill most of the picture. Hold steady.');
     if (narrow.matches) $('table').scrollIntoView({ block: 'start', behavior: 'smooth' }); // keep this table in view above the camera
-    camLoop();
+    renderCamRead(); camLoop();
   }
   function stopCamera() {
     clearTimeout(cam.timer); cam.timer = 0;
@@ -1044,12 +1169,56 @@
       const c = cam.canvas || (cam.canvas = document.createElement('canvas'));
       if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
       const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(v, 0, 0, W, H);
-      let r = null; try { r = CardVision.analyze(g.getImageData(0, 0, W, H).data, W, H, { fourColor: cam.four }); } catch (e) { console.warn(e); }
+      const px = g.getImageData(0, 0, W, H).data;
+      let r = null; try { r = CardVision.analyze(px, W, H, { fourColor: cam.four }); } catch (e) { console.warn(e); }
       if (r && r.fourColor && !cam.four) cam.four = true; // the screen being filmed uses a four-colour deck: suits are read by colour
-      if (r) { cam.last = r; drawCamOverlay(r); onCamReading(r); }
+      if (r) { drawCamOverlay(r); onFrame(r, updateThumb(px, W, H)); }
     }
     cam.timer = setTimeout(camLoop, Math.max(30, 180 - (performance.now() - t0)));
   }
+  function onFrame(r, pic) {
+    syncLock();
+    // the on-device reading, once it has held for 3 frames
+    const usable = r.complete && (r.hero || r.board.length);
+    const L = usable ? { hero: r.hero, board: r.board.length ? r.board : r.hero ? [] : null } : null;
+    const key = L ? readKey(L) : null;
+    cam.seen.push(key); if (cam.seen.length > 3) cam.seen.shift();
+    const steady = key && cam.seen.length === 3 && cam.seen.every(x => x === key);
+    if (steady) { if (key !== cam.localKey) { cam.localKey = key; cam.localSince = Date.now(); } cam.local = L; cam.localAt = Date.now(); }
+    const wants = steady && planFor(L).changes && key !== cam.askedLocal;
+    if (aiReady()) {
+      if (!cam.ai.busy && pic.settled && (pic.changed || wants) && Date.now() - cam.ai.last > 1200) askAI();
+      else if (!cam.ai.busy && !pic.settled && pic.changed) camNote('Waiting for the picture to settle…');
+    } else if (steady) {
+      // the camera alone: fills apply once steady; a new hand has to hold for 1.5 s
+      const p = planFor(L);
+      if ((p.changes || p.conflict) && !(p.newHand && Date.now() - cam.localSince < 1500)) decide(L, 'camera');
+    } else if (!usable) camNote(r.cards.length ? 'Some cards aren\'t clear yet: move a little closer or hold steadier.' : 'Point it at the table so the cards fill most of the picture.');
+    renderCamRead();
+  }
+  // Locked cards, what the camera sees right now, and any disagreement waiting for you.
+  function renderCamRead() {
+    if (!cam.lock || !hand) return;
+    const lh = lockedHero(), lb = lockedBoard(), seen = cam.local;
+    let html = `<span><b>You</b>${lh ? `🔒 ${esc(cardsTxt(lh))}` : '<span class="note">waiting</span>'}</span><span><b>Board</b>${lb.length ? `🔒 ${esc(cardsTxt(lb))}` : '<span class="note">none yet</span>'}</span>`;
+    html += `<span class="note cam-ai">${aiReady() ? `AI check on · ${cam.ai.calls} call${cam.ai.calls === 1 ? '' : 's'}` : HV && HV.api.has('vision') ? 'AI check paused' : 'On-device only'}${cam.ai.busy ? ' · checking…' : ''}</span>`;
+    if (seen && !sameCards(seen.hero || [], lh || []) && seen.hero) html += `<span class="note">Camera sees ${esc(cardsTxt(seen.hero))}${seen.board && seen.board.length ? ` · ${esc(cardsTxt(seen.board))}` : ''}</span>`;
+    if (cam.conflict) {
+      const c = cam.conflict;
+      html += `<div class="cam-conflict">The camera reads ${c.kind === 'hero' ? 'your cards' : 'the board'} as <b>${esc(cardsTxt(c.cards))}</b>; the table has ${esc(cardsTxt(c.was))}. <span class="cam-btns"><button type="button" data-cam="use">Use the camera's</button><button type="button" data-cam="keep">Keep</button></span></div>`;
+    }
+    $('camRead').innerHTML = html;
+  }
+  $('camRead').addEventListener('click', e => {
+    const b = e.target.closest('[data-cam]'); if (!b || !cam.conflict) return;
+    const c = cam.conflict; cam.conflict = null;
+    if (b.dataset.cam === 'keep') { cam.ignore = c.key; renderCamRead(); return; }
+    autoRun++; closePicker();
+    if (c.kind === 'hero') { edit('set_hero_cards', { cards: c.cards }); syncLock(); cam.lock.hero = true; }
+    else { edit('set_board', { cards: c.cards }); syncLock(); cam.lock.board = c.cards.length; const t = BOARD_N.indexOf(c.cards.length); if (step > t) go(t); }
+    camNote('Updated from the camera.'); renderCamRead();
+  });
+  $('camReread').addEventListener('click', () => { syncLock(); cam.lock.hero = false; cam.lock.board = 0; cam.conflict = null; cam.ignore = ''; cam.asked = null; cam.askedLocal = ''; camNote('Reading the table again…'); renderCamRead(); });
   // Boxes over the preview: gold = your cards, green = the board, grey = other cards, dashed = not sure yet.
   function drawCamOverlay(r) {
     const cv = $('camOverlay'), box = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
@@ -1068,37 +1237,6 @@
       g.fillStyle = 'rgba(0,0,0,.65)'; g.fillRect(tx, ty - 16 * dpr, g.measureText(label).width + 8 * dpr, 16 * dpr);
       g.fillStyle = col; g.fillText(label, tx + 4 * dpr, ty - 4 * dpr);
     }
-  }
-  // Same reading for 3 frames in a row → put it on the table (once).
-  function onCamReading(r) {
-    const usable = r.complete && (r.hero || r.board.length);
-    const key = usable ? `${r.hero ? r.hero.join(' ') : '-'}|${r.board.join(' ')}` : null;
-    cam.seen.push(key); if (cam.seen.length > 3) cam.seen.shift();
-    const steady = key && cam.seen.length === 3 && cam.seen.every(k => k === key);
-    const read = [r.hero ? `<span><b>You</b>${esc(cardsTxt(r.hero))}</span>` : '', r.board.length ? `<span><b>Board</b>${esc(cardsTxt(r.board))}</span>` : ''].filter(Boolean).join('');
-    $('camRead').innerHTML = read || '<span class="note">No cards in view yet.</span>';
-    if (!usable) { camNote(r.cards.length ? 'Some cards aren\'t clear yet: move a little closer or hold steadier.' : 'Point it at the table so the cards fill most of the picture.'); return; }
-    if (!steady) { camNote('Reading…'); return; }
-    if (key === cam.applied) { camNote($('camAuto').checked ? 'The table matches what the camera sees.' : 'Reading. Turn on "Update the table" to apply it.'); return; }
-    if (!$('camAuto').checked) { camNote('Reading. Turn on "Update the table" to apply it.'); return; }
-    const done = applyCamera(r);
-    cam.applied = key;
-    camNote(done.length ? `Updated: ${done.join(', ')}.` : 'The table matches what the camera sees.');
-  }
-  function applyCamera(r) {
-    const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
-    const shownBoard = () => hand.board.slice(0, BOARD_N[step]).map(E.codeOf);
-    const done = [];
-    autoRun++; closePicker();
-    const heroNew = r.hero && !same(r.hero, scenario.hero.cards);
-    // the board went away, or both of your cards changed before a flop: the other table dealt a new hand
-    if (r.hero && ((!r.board.length && shownBoard().length) || (heroNew && !r.hero.some(c => scenario.hero.cards.includes(c)) && !r.board.length))) { newHand(); done.push('new hand'); }
-    if (r.hero && !same(r.hero, scenario.hero.cards)) { const x = edit('set_hero_cards', { cards: r.hero }); if (x.ok) done.push(`your cards ${cardsTxt(r.hero)}`); }
-    if (r.board.length && !same(r.board, shownBoard())) {
-      const x = edit('set_board', { cards: r.board });
-      if (x.ok) { const target = BOARD_N.indexOf(r.board.length); if (step > target) go(target); done.push(`${['', '', '', 'flop', 'turn', 'river'][r.board.length]} ${cardsTxt(r.board)}`); }
-    }
-    return done;
   }
   $('camBtn').addEventListener('click', () => (cam.stream ? stopCamera() : startCamera()));
   $('camClose').addEventListener('click', stopCamera);
