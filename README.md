@@ -65,16 +65,17 @@ Ranges use standard notation: `QQ+`, `22-55`, `AKs`, `AQo+`, `A5s-A2s`, `KT+`, `
 
 ## Playing a hand
 
-Betting is played turn by turn in real table order (preflop from under the gun to the big blind, after the flop from the small blind to the button). Whoever's turn it is glows, and a small bar beside them offers four choices:
+Betting is played turn by turn in real table order (preflop from under the gun to the big blind, after the flop from the small blind to the button). Each player sits around the rail with a name plate (name and stack) and a speech bubble with their latest action; whoever's turn it is glows, with a moving bar under their plate. The buttons under the table are for that player:
 
 | Button | No bet yet | Facing a bet |
 |---|---|---|
-| **Check / Call** | check | call the bet (or all-in if it's more than the stack) |
-| **Bet ½ / Raise** | a light bet: half the pot | a light raise: about 2½× the bet |
-| **Bet pot / Big raise** | a heavy bet: the size of the pot | a heavy raise: pot-sized |
 | **Fold** | give up the hand | give up the hand |
+| **Check / Call** | check | call the bet (or all-in if it's more than the stack) |
+| **Bet / Raise** | opens the sizing: ⅓, ½, ¾ pot, Pot, All-in | opens the sizing: 2.5×, 3×, 4×, Pot, All-in |
 
-Chips slide in front of each player as they bet and sweep into the pot when the street ends. **Auto ▸** lets the opponents play until it's your turn: preflop they play the same charts (raise or fold), loosened or tightened by style (stations and fish call more, maniacs and LAGs raise more); after the flop they play their actual cards with their style. **Play to the flop/turn/river** finishes the betting round (you check/call) and deals the next card. On your turn the button the "What you should do" gauge recommends is starred. Folding ends the hand for you; Undo takes back any action. The stats, the gauge and the coach all use the actual action: who is still in, the pot, what you have to call, who raised and who called.
+In the sizing, pick a preset or use the slider and − / +, then **Confirm**; **‹ Back** closes it. On your turn it starts at the suggested size. The **Felt** option switches the cloth between brown, green and blue.
+
+Chips slide in front of each player as they bet and sweep into the pot when the street ends. **Auto ▸** lets the opponents play until it's your turn: preflop they play the same charts (raise or fold), loosened or tightened by style (stations and fish call more, maniacs and LAGs raise more); after the flop they play their actual cards with their style. **Play to the flop/turn/river** finishes the betting round (you check/call) and deals the next card. On your turn the button the "What you should do" gauge recommends is starred, and the suggestion is shown above the buttons. Folding ends the hand for you; Undo takes back any action. The stats, the gauge and the coach all use the actual action: who is still in, the pot, what you have to call, who raised and who called.
 
 ## Camera (experimental)
 

@@ -419,6 +419,7 @@
       seat, street: m.frontier, owe: Math.min(owe, leftNow), canCheck: owe <= 0, pot: snap.pot,
       callAllIn: owe >= leftNow, canRaise: leftNow > owe, kind,
       small: { to: small, allIn: small >= cap }, big: { to: big, allIn: big >= cap, same: big <= small },
+      facing: snap.max, minTo: Math.min(cap, minTo), maxTo: cap,
     };
   }
 
