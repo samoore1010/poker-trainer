@@ -140,17 +140,72 @@ test('out of position a marginal call becomes a fold (equity realization)', () =
   assert.equal(E.recommend(ctx(false)).action, 'fold');
 });
 
-// ----- opponents' likely hands from what they did -----
-test('opponents are read from their preflop actions', () => {
+// ----- your read on an opponent -----
+const R = require('../public/ranges.js');
+const share = (read, test) => read.groups.filter(g => test(g.key)).reduce((n, g) => n + g.n, 0) / read.n;
+const strong = k => /^(sf|quads|fh|flush|straight|set|trips|two)$/.test(k);
+function flopRead({ style, flop = [] } = {}) {
+  const sc = spot({ pos: 'BB', cards: ['5d', '4d'], moves: [['UTG', 'raise', 5], [0, 'call']], wait: true });
+  S.apply(sc, 'set_board', { cards: ['Kh', '7s', '2c'] });
+  const utg = S.seatOfPosition(sc, 'UTG');
+  if (style) S.apply(sc, 'set_opponent', { seat: utg, style });
+  for (const [seat, action, amount] of flop) S.apply(sc, 'act', { seat, action, amount });
+  return { sc, utg, read: S.readOf(sc, utg, 1) };
+}
+test('the read starts from the preflop chart for what they did', () => {
   const sc = spot({ pos: 'BTN', cards: ['Ah', 'Kd'], moves: [['UTG', 'raise', 5], ['HJ', 'call']] });
-  const inf = S.inferredRanges(sc), utg = S.seatOfPosition(sc, 'UTG'), hj = S.seatOfPosition(sc, 'HJ');
-  assert.equal(inf[utg].kind, 'open'); assert.equal(inf[hj].kind, 'call-open');
-  assert.ok(inf[utg].pct > 10 && inf[utg].pct < 22);
-  assert.match(S.seatRangeLabel(sc, utg), /opened/);
-  const opps = S.engineOpponents(sc, 0);
-  assert.equal(opps.filter(o => o.range).length, 2); // the opener and the caller carry ranges; the blinds haven't acted yet
-  S.apply(sc, 'set_opponent', { seat: utg, range: 'QQ+' }); // your read wins
-  assert.equal(S.likelyRange(sc, utg), 'QQ+');
+  const utg = S.seatOfPosition(sc, 'UTG'), hj = S.seatOfPosition(sc, 'HJ');
+  assert.equal(S.inferredRanges(sc)[utg].kind, 'open'); assert.equal(S.inferredRanges(sc)[hj].kind, 'call-open');
+  const r = S.readOf(sc, utg, 0);
+  assert.equal(r.kind, 'model'); assert.ok(r.pct > 10 && r.pct < 18, r.pct);
+  assert.match(r.steps[0].text, /Opened from UTG/);
+  // your own cards are removed: no hand in the read uses your ace of hearts or king of diamonds
+  const mine = ['Ah', 'Kd'].map(E.cardFromCode);
+  assert.ok(r.combos.every(([a, b]) => !mine.includes(a) && !mine.includes(b)));
+  assert.ok(S.engineOpponents(sc, 0).every(o => o.combos || o.cards));
+  S.apply(sc, 'set_opponent', { seat: utg, range: 'QQ+' }); // a range you type is used as it is
+  const typed = S.readOf(sc, utg, 0);
+  assert.equal(typed.kind, 'range'); assert.ok(typed.pct < 2);
+});
+test('a big bet polarizes the read; a check takes strong hands out', () => {
+  const before = flopRead().read;
+  const bet = flopRead({ flop: [[0, 'check'], ['UTG', 'bet', 11]] }).read;
+  const chk = flopRead({ flop: [[0, 'check'], ['UTG', 'check']] }).read;
+  assert.equal(bet.steps.length, 2); assert.match(bet.steps[1].text, /Bet .* polarized/);
+  const midK = k => /^(tpw|mid|under|bottom|small)$/.test(k);
+  assert.ok(share(bet, strong) > share(before, strong) * 1.2, 'more strong hands after a big bet');
+  assert.ok(share(bet, midK) < share(before, midK), 'fewer medium hands after a big bet');
+  assert.ok(share(chk, strong) < share(before, strong) * 0.8, 'fewer strong hands after a check');
+});
+test('a calling station calls with weaker hands than a nit', () => {
+  const flop = [[0, 'bet', 8], ['UTG', 'call']];
+  const weak = k => /^(bottom|small|ace|air|gut|mid|under|tpw)/.test(k);
+  assert.ok(share(flopRead({ style: 'calling station', flop }).read, weak) > share(flopRead({ style: 'nit', flop }).read, weak) * 1.3);
+});
+test('the read never depends on their hidden cards', () => {
+  const a = flopRead({ flop: [[0, 'check'], ['UTG', 'bet', 11]] }), b = flopRead({ flop: [[0, 'check'], ['UTG', 'bet', 11]] });
+  // two different deals (each spot() is a fresh random table), same public facts → same read
+  assert.deepEqual(a.read.combos.map(h => h.join()).sort().slice(0, 50), b.read.combos.map(h => h.join()).sort().slice(0, 50));
+  assert.ok(!('cards' in a.sc.opponents[a.utg - 1]) || a.sc.opponents[a.utg - 1].cards === null);
+});
+test('weighted hands in the engine', () => {
+  const c = E.cardFromCode, hero = ['Qh', 'Qd'].map(c);
+  const AA = [c('As'), c('Ac')], T2 = [c('2s'), c('2c')];
+  const even = E.equity({ hero, opps: [{ combos: [[...AA, 1], [...T2, 1]] }], trials: 6000 }).chance;
+  const aces = E.equity({ hero, opps: [{ combos: [[...AA, 3], [...T2, 1]] }], trials: 6000 }).chance;
+  const none = E.equity({ hero, opps: [{ combos: [[...AA, 0], [...T2, 1]] }], trials: 6000 }).chance;
+  assert.ok(aces < even - 10 && none > 75, `${even} ${aces} ${none}`);
+});
+test('hand classes on a board', () => {
+  const c = x => x.map(E.cardFromCode), board = c(['Kh', '7h', '2c']);
+  assert.equal(R.classify(c(['7s', '7d']), board).made, 'set');
+  assert.equal(R.classify(c(['Ks', 'Qd']), board).key, 'G');
+  assert.equal(R.classify(c(['Ah', '5h']), board).key, 'D2');
+  assert.equal(R.classify(c(['9s', '8d']), board).key, 'A');
+  assert.equal(R.classify(c(['As', 'Ad']), board).made, 'over');
+  const f = R.freqs('S', { facing: false }), a = R.freqs('A', { facing: false });
+  assert.ok(f.small + f.big > a.small + a.big);
+  assert.ok(R.freqs('W', { facing: true, price: 0.25, mods: R.MODS.station }).call > R.freqs('W', { facing: true, price: 0.25, mods: R.MODS.nit }).call);
 });
 
 // ----- computer players -----

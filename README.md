@@ -15,8 +15,12 @@ A Texas Hold'em trainer. Set up any spot by talking to the coach, picking cards,
 - **What you should do** (`strategy.js` preflop, `recommend` in `engine.js` after the flop): a rule-of-thumb gauge at the top of the Read tab, aimed at a disciplined long-run player who folds most hands. It is not a solver.
   - **Preflop:** standard 100-big-blind charts. Raise first in by seat (about 16% of hands under the gun six-handed, 46% on the button; nobody limps), 3-bet / call / fold against a raise by your seat and the raiser's, tighter with callers in, 4-bet / call / fold against a 3-bet, premiums only against a 4-bet. Limped pots: raise the limpers, overlimp a few suited hands late, complete the small blind, check the big blind.
   - **After the flop:** your win chance against the price, discounted out of position (you won't see every card or get paid every time you hit): about 80% of it on the flop and 90% on the turn. Draws call only when they're close to the price. Value bets depend on win chance, board texture, number of opponents and calling stations.
-  - **Opponents' hands:** a player you've given cards, a range or a style is played that way. Otherwise their hand is read from what they did preflop: an opener holds that seat's opening range, a caller a calling range, a 3-bettor a 3-bet range, a limper a limping range. Before they act they count as random.
+  - **Opponents' hands:** the odds and the advice use your read on each player (below), or their cards if you set them.
   - **Before your turn** it previews your decision: *If it folds to you: Raise to $5*, *If UTG raises to $5: Fold*.
+- **Your read on a player** (`ranges.js`, `readOf` in `scenario.js`): click any opponent and a *range* tab opens in the panel with every exact hand you should put them on, grouped by what it makes on the board (sets, top pair, flush draws, nothing…), how likely each is, how the range narrowed step by step, and how your hand does against it. It's built only from what you can see: their seat, the style you gave them, their bets, the board and your own cards (card removal). Their hidden cards are never used.
+  - Preflop it starts from the chart range for what they did (opened, called, 3-bet, limped), wider or tighter for their style.
+  - After the flop every possible hand is weighted by how likely it is to have taken each action: big bets are polarized (strong hands, draws, some bluffs), small bets wide, calls condensed (pairs and draws; monsters would raise), checks capped (strong hands usually bet). Styles shift it: stations call with weak pairs, nits rarely bluff, maniacs bluff a lot.
+  - The computer players act after the flop with the same frequencies using their real cards, so the read matches how they play. A range you type for a player is used as it is.
 - **Coach agent** (`server/agent/`): an LLM that turns what you say into one `update_table` call (every change at once; it returns fresh stats and the recommendation), plus `calculate` (another street) and `what_if` (compare without changing the table). Each message already carries the current stats, so a plain question needs no tool call. A setup is two model calls; progress streams to the page so the table updates before the written answer arrives. It never invents numbers.
 
 The LLM is the interface, not the calculator. Poker probabilities need exact arithmetic that a model can't do reliably; the engine is exact, fast and free, and the model handles language, setup and explanation.
@@ -97,6 +101,7 @@ public/
   index.html         table, card picker, stats panel, coach bar
   engine.js          poker math (shared by browser, worker and server)
   strategy.js        preflop charts: advice, computer players, opponents' likely ranges (shared)
+  ranges.js          hand reading after the flop: how each kind of hand acts, by style (shared)
   scenario.js        the scenario record and the edit operations (shared)
   stats-worker.js    runs the engine off the main thread
   voice.js           HandVoice: recorder + level meter, API client, speak()

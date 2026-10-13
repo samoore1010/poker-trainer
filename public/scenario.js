@@ -3,10 +3,10 @@
 // Shared by the browser (window.PokerScenario) and the server (require). Cards are codes like "Ah", "Tc".
 (function (root, factory) {
   const node = typeof module === 'object' && module.exports;
-  const api = factory(node ? require('./engine.js') : root.PokerEngine, node ? require('./strategy.js') : root.PokerStrategy);
+  const api = factory(node ? require('./engine.js') : root.PokerEngine, node ? require('./strategy.js') : root.PokerStrategy, node ? require('./ranges.js') : root.PokerRanges);
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.PokerScenario = api;
-})(typeof self !== 'undefined' ? self : this, function (E, PS) {
+})(typeof self !== 'undefined' ? self : this, function (E, PS, RG) {
   'use strict';
 
   const STREETS = ['preflop', 'flop', 'turn', 'river', 'showdown'];
@@ -166,11 +166,124 @@
     const x = (inf || inferredRanges(sc))[seat];
     return x ? x.range : '';
   }
-  function seatRangeLabel(sc, seat, inf) {
+  function seatRangeLabel(sc, seat, s) {
     const o = sc.opponents[seat - 1];
-    if (o.cards || effRange(o)) return rangeLabel(o);
-    const x = (inf || inferredRanges(sc))[seat];
-    return x ? `${x.label}: likely about ${Math.round(x.pct)}% of hands` : 'random hand';
+    if (o.cards) return rangeLabel(o);
+    const r = readOf(sc, seat, s === undefined ? Math.min(sc.street, 3) : s);
+    return r.summary;
+  }
+
+  // ----- your read on an opponent -----
+  // The hands you should put them on from what you can see: their seat, the style you gave them, what they did on
+  // each street, the board, and your own cards (card removal). Their hidden cards are never looked at.
+  // Preflop the charts give a starting range; after the flop each possible holding is weighted by how likely it is to
+  // have taken the actions you saw (ranges.js). A range you typed is used as it is (only card removal applies).
+  // → {kind: known|range|model, combos: [[a,b,w]], n (weighted hands), pct, steps: [{text, n}], groups, summary}
+  const readMemo = new Map();
+  const ALL = E.rangeOf('').combos;
+  const cap1s = x => x.charAt(0).toUpperCase() + x.slice(1);
+  function readOf(sc, seat, s) {
+    s = Math.max(0, Math.min(3, s === undefined ? sc.street : s));
+    const key = JSON.stringify([sc.streets, sc.board, sc.hero.cards, sc.opponents, sc.button, sc.bigBlind, sc.smallBlind, sc.hero.stack, seat, s]);
+    const hit = readMemo.get(key); if (hit) return hit;
+    const r = buildRead(sc, seat, s);
+    if (readMemo.size > 80) readMemo.clear();
+    readMemo.set(key, r); return r;
+  }
+  function buildRead(sc, seat, s) {
+    const o = sc.opponents[seat - 1], m = money(sc), pos = positions(sc), board = sc.board.slice(0, BOARD_N[s]).map(E.cardFromCode);
+    if (o.cards) { const cs = o.cards.map(E.cardFromCode); return { kind: 'known', combos: [[cs[0], cs[1], 1]], n: 1, pct: 100 / 1326, steps: [{ text: `You set their cards: ${prettyList(o.cards)}.`, n: 1 }], groups: [], summary: `known: ${prettyList(o.cards)}` }; }
+    // cards you can see: yours, the board, anyone's known cards
+    const dead = new Set(board);
+    sc.hero.cards.forEach(c => dead.add(E.cardFromCode(c)));
+    sc.opponents.forEach((x, i) => { if (i !== seat - 1 && x.cards) x.cards.forEach(c => dead.add(E.cardFromCode(c))); });
+    const w = new Map(); // a*52+b → weight
+    const steps = [], total = () => { let t = 0; w.forEach((x, k) => { if (!dead.has(Math.floor(k / 52)) && !dead.has(k % 52)) t += x; }); return t; };
+    const set = (text, list, weightOf) => { list.forEach(([a, b]) => w.set(a * 52 + b, weightOf ? weightOf(a, b) : 1)); };
+    const mods = RG.modsFor(o.style);
+    let kind = 'model';
+    if (o.range) {
+      kind = 'range';
+      set('', E.rangeOf(o.range).combos);
+      steps.push({ text: `Using the range you set: ${o.range}. It isn't narrowed further by their betting.`, n: total() });
+    } else {
+      const inf = inferredRanges(sc, m)[seat], styleR = effRange(o);
+      const width = styleR ? E.rangeOf(styleR).pct : 25, f = Math.max(0.3, width / 25);
+      if (!inf) {
+        set('', styleR ? E.rangeOf(styleR).combos : ALL);
+        steps.push({ text: styleR ? `Hasn't put money in voluntarily yet. As a${/^[aeiou]/.test(o.style) ? 'n' : ''} ${o.style} player they play about ${Math.round(width)}% of hands.` : `Hasn't put money in voluntarily yet: any two cards.`, n: total() });
+      } else if (inf.kind === 'bb-check') {
+        const iso = E.rangeOf(PS.ISO_BB).combos.map(([a, b]) => a * 52 + b);
+        set('', ALL); iso.forEach(k => w.set(k, 0.25));
+        steps.push({ text: 'Checked the big blind: any hand, though strong ones would usually have raised.', n: total() });
+      } else {
+        const chart = E.rangeOf(inf.range), inChart = new Set(chart.combos.map(([a, b]) => a * 52 + b)), pct = chart.pct;
+        set('', ALL, (a, b) => {
+          const k = a * 52 + b, top = E.PCT[E.handLabel(a, b)];
+          if (inChart.has(k)) return f < 1 && !styleR ? 1 : f < 1 && top > pct * f ? 0.2 : 1;
+          return f > 1 && top <= pct * f ? 0.7 : 0;
+        });
+        steps.push({ text: `${cap1s(inf.label)} from ${pos[seat]}: a solid player does that with about ${Math.round(pct)}% of hands${f > 1.05 ? `; as a${/^[aeiou]/.test(o.style) ? 'n' : ''} ${o.style} player, wider` : f < 0.95 ? `; as a ${o.style} player, tighter` : ''}.`, n: total() });
+      }
+      if (mods.text) steps.push({ text: mods.text, n: null });
+      // after the flop: every action they took, in order
+      const pfr = m.street[0] ? m.street[0].lastAgg : null;
+      for (let k = 1; k <= s; k++) {
+        const snap = m.street[k]; if (!snap) break;
+        if (!snap.actions.some(a => a.seat === seat)) continue;
+        if (sc.board.length < BOARD_N[k]) { steps.push({ text: `The ${STREETS[k]} cards aren't set, so their ${STREETS[k]} action can't be read.`, n: null }); continue; }
+        const bd = sc.board.slice(0, BOARD_N[k]).map(E.cardFromCode), cls = new Map();
+        const contrib = new Array(sc.opponents.length + 1).fill(0); let max = 0, firstIn = true;
+        for (const a of snap.actions) {
+          const owe = max - contrib[a.seat], potBefore = snap.start + contrib.reduce((x, y) => x + y, 0);
+          if (a.seat === seat && a.type !== 'fold') {
+            const facing = owe > 0, sit = { facing, price: facing ? owe / (potBefore + owe) : 0, river: k === 3, cbet: k === 1 && pfr === seat && firstIn, mods };
+            const bet = a.to - contrib[a.seat], frac = bet / Math.max(potBefore, 1e-9);
+            const act = facing ? (a.type === 'call' ? 'call' : 'raise') : a.type === 'check' ? 'check' : frac > 0.6 ? 'big' : 'small';
+            w.forEach((x, key) => {
+              if (!x) return;
+              const c1 = Math.floor(key / 52), c2 = key % 52;
+              if (bd.includes(c1) || bd.includes(c2)) { w.set(key, 0); return; }
+              let c = cls.get(key); if (!c) { c = RG.classify([c1, c2], bd); cls.set(key, c); }
+              w.set(key, x * RG.freqs(c.key, sit)[act]);
+            });
+            let top = 0; w.forEach(x => { if (x > top) top = x; });
+            if (top > 0) w.forEach((x, key) => w.set(key, x / top)); // the likeliest holdings count fully; the rest relative to them
+            const what = act === 'check' ? 'Checked' : act === 'call' ? `Called ${fmt(sc, owe)}` : act === 'raise' ? `Raised to ${fmt(sc, a.to)}` : `Bet ${fmt(sc, bet)} (${Math.round(frac * 100)}% of the pot)`;
+            steps.push({ text: `${what} on the ${STREETS[k]}: ${RG.SAYS[act]}.`, n: total() });
+          }
+          if (a.type === 'fold') { if (a.seat === seat) steps.push({ text: `Folded on the ${STREETS[k]}.`, n: null }); }
+          else if (a.type !== 'check') { contrib[a.seat] = Math.max(contrib[a.seat], a.to); max = Math.max(max, a.to); }
+          if (a.type === 'bet' || a.type === 'raise') firstIn = false;
+          if (a.seat === seat) firstIn = false;
+        }
+      }
+    }
+    // what's left, grouped by what it is on the board you're looking at
+    const combos = []; let n = 0;
+    w.forEach((x, key) => { const a = Math.floor(key / 52), b = key % 52; if (x > 0.01 && !dead.has(a) && !dead.has(b)) { combos.push([a, b, x]); n += x; } });
+    const groups = new Map();
+    for (const h of combos) {
+      let g, ord;
+      if (board.length >= 3) { const c = RG.classify([h[0], h[1]], board); g = c.group; ord = RG.groupOrd(g); }
+      else { const pg = preflopGroup(h[0], h[1]); g = pg[0]; ord = pg[1]; }
+      if (!groups.has(g)) groups.set(g, { key: g, name: board.length >= 3 ? RG.groupName(g) : g, ord, n: 0, combos: [] });
+      const G = groups.get(g); G.n += h[2]; G.combos.push(h);
+    }
+    const list = [...groups.values()].sort((x, y) => x.ord - y.ord);
+    list.forEach(G => G.combos.sort((x, y) => y[2] - x[2] || Math.max(y[0], y[1]) - Math.max(x[0], x[1]) || Math.min(y[0], y[1]) - Math.min(x[0], x[1])));
+    const pct = n / 1326 * 100;
+    const summary = kind === 'range' ? `your range: ${o.range} (about ${round(pct)}% of hands)` : `about ${pct >= 10 ? Math.round(pct) : Math.round(pct * 10) / 10}% of hands (${Math.round(n)} combos)`;
+    return { kind, combos, n, pct, steps, groups: list, summary, mods: mods.text };
+  }
+  function preflopGroup(a, b) {
+    let r1 = E.rankOf(a), r2 = E.rankOf(b); if (r1 < r2) [r1, r2] = [r2, r1];
+    const suited = E.suitOf(a) === E.suitOf(b);
+    if (r1 === r2) return [r1 >= 10 ? 'Big pairs (QQ+)' : r1 >= 6 ? 'Middle pairs (88–JJ)' : 'Small pairs (22–77)', r1 >= 10 ? 1 : r1 >= 6 ? 2 : 3];
+    if (r1 === 12) return r2 >= 8 ? ['Big aces (AT+)', 4] : [suited ? 'Suited aces' : 'Offsuit aces', suited ? 5 : 8];
+    if (r2 >= 8) return ['Broadway cards', 6];
+    if (suited) return r1 - r2 <= 2 ? ['Suited connectors', 7] : ['Other suited hands', 9];
+    return ['Other offsuit hands', 10];
   }
 
   // ----- betting: replay the action lists in table order -----
@@ -415,7 +528,7 @@
     const m = money(sc), snap = m.street[m.frontier];
     const o = seat > 0 ? sc.opponents[seat - 1] : null;
     const owe = snap.max - snap.contrib[seat], pot = snap.pot, rnd = Math.random();
-    const style = (o && o.style) || '', loose = /station|fish|maniac|loose|lag/.test(style), aggro = /maniac|lag|aggressive/.test(style);
+    const style = (o && o.style) || '', aggro = /maniac|lag|aggressive/.test(style);
     if (m.frontier === 0) {
       // Preflop the computer plays the same charts as the advice (raise or fold, rarely limp), loosened or tightened
       // by its style: stations and fish call more, maniacs and LAGs raise more, nits and tight players fold more.
@@ -432,20 +545,12 @@
       if (act === 'raise') return d.to && d.to > snap.max ? { action: 'raise', amount: d.to } : { action: 'small' };
       return { action: act };
     }
-    const d = E.describe(hole, board), outs = E.drawOuts(hole, board).outs;
-    const strong = !d.shared && d.c >= 3, medium = !d.shared && d.c >= 1 && !strong, drawing = outs >= 8;
-    if (owe <= 0) {
-      if (strong) return { action: rnd < 0.6 ? 'big' : 'small' };
-      if (medium && rnd < (aggro ? 0.7 : 0.45)) return { action: 'small' };
-      if (drawing && rnd < 0.35) return { action: 'small' };
-      if (!medium && rnd < (aggro ? 0.25 : 0.08)) return { action: 'small' };
-      return { action: 'check' };
-    }
-    const price = owe / (pot + owe);
-    if (strong) return { action: rnd < 0.35 ? 'small' : 'call' };
-    if (medium) return { action: price < (loose ? 0.45 : 0.33) || rnd < 0.25 ? 'call' : 'fold' };
-    if (drawing) return { action: price < 0.3 ? 'call' : 'fold' };
-    return { action: loose && rnd < 0.4 ? 'call' : aggro && rnd < 0.1 ? 'small' : 'fold' };
+    // After the flop: the same frequencies your read assumes (ranges.js), played with its actual cards.
+    const c = RG.classify(hole, board), facing = owe > 0;
+    const f = RG.freqs(c.key, { facing, price: facing ? owe / (pot + owe) : 0, river: board.length >= 5, cbet: m.frontier === 1 && m.street[0] && m.street[0].lastAgg === seat && !snap.actions.some(a => a.type === 'bet' || a.type === 'raise' || a.seat === seat), mods: RG.modsFor(style) });
+    if (!facing) return { action: rnd < f.big ? 'big' : rnd < f.big + f.small ? 'small' : 'check' };
+    if (rnd < f.raise) return { action: c.key === 'S' && Math.random() < 0.3 ? 'big' : 'small' };
+    return { action: rnd < f.raise + f.call ? 'call' : 'fold' };
   }
 
   const ops = {
@@ -615,9 +720,14 @@
 
   // ----- reading a scenario -----
   // The live opponents at street s as engine inputs.
+  // The live opponents at street s as engine inputs: known cards, or your read on them (weighted hands).
+  function engineOpponent(sc, seat, s) {
+    const o = sc.opponents[seat - 1];
+    return o.cards ? { cards: o.cards.map(E.cardFromCode) } : { combos: readOf(sc, seat, s).combos };
+  }
   function engineOpponents(sc, s) {
-    const m = money(sc), inf = inferredRanges(sc, m);
-    return m.liveAfter[Math.min(s, 3)].filter(x => x > 0).map(seat => { const o = sc.opponents[seat - 1]; return o.cards ? { cards: o.cards.map(E.cardFromCode) } : { range: likelyRange(sc, seat, inf) }; });
+    const m = money(sc);
+    return m.liveAfter[Math.min(s, 3)].filter(x => x > 0).map(seat => engineOpponent(sc, seat, s));
   }
   // Plain-text description for the agent (and for debugging). Only what you'd know at the table: no hidden cards.
   function summary(sc) {
@@ -728,5 +838,5 @@
     };
   }
 
-  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, setUnit, getUnit, fmt };
+  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, readOf, engineOpponent, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, setUnit, getUnit, fmt };
 });

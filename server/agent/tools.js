@@ -74,6 +74,12 @@ const DEFS = [
 ];
 
 const pct = x => Math.round(x * 10) / 10;
+// The biggest parts of your read on a player ("Top pair, good kicker 35%"), for the model to explain.
+function readTop(sc, seat, s) {
+  if (sc.opponents[seat - 1].cards) return undefined;
+  const r = S.readOf(sc, seat, s);
+  return r.groups.slice().sort((a, b) => b.n - a.n).slice(0, 5).map(g => `${g.name} ${Math.round(g.n / r.n * 100)}%`);
+}
 
 // The engine's read of a scenario at a street. Returns a compact object for the model (and the browser).
 function calculate(sc, street, exclude = new Set()) {
@@ -81,9 +87,9 @@ function calculate(sc, street, exclude = new Set()) {
   if (sc.hero.cards.length !== 2) return { error: 'The user\'s cards are not set (they are random on the table). Set them with set_hero_cards, or ask the user.' };
   const hero = sc.hero.cards.map(E.cardFromCode), want = S.BOARD_N[s];
   const board = sc.board.slice(0, want).map(E.cardFromCode);
-  const m = S.money(sc), inf = S.inferredRanges(sc, m);
+  const m = S.money(sc);
   const live = S.liveOpponents(sc, s).filter(seat => !exclude.has(seat));
-  const opps = live.map(seat => { const o = sc.opponents[seat - 1]; return o.cards ? { cards: o.cards.map(E.cardFromCode) } : { range: S.likelyRange(sc, seat, inf) }; });
+  const opps = live.map(seat => S.engineOpponent(sc, seat, s));
   const r = E.equity({ hero, board, opps, trials: 6000 });
   const d = board.length ? E.describe(hero, board) : null;
   const out = {
@@ -92,8 +98,8 @@ function calculate(sc, street, exclude = new Set()) {
     board_note: board.length < want ? `Only ${board.length} board cards are fixed; the rest of the ${S.STREETS[s]} is unknown, so this is computed before those cards come.` : undefined,
     hand: d ? d.text.replace(/<[^>]+>/g, '') : `${E.preflopShort(hero)} (top ${Math.round(E.PCT[E.handLabel(hero[0], hero[1])])}% of starting hands)`,
     win_pct: pct(r.chance),
-    method: r.exact ? `exact (all ${r.trials} outcomes)` : `simulated (${r.trials} deals)`,
-    against: live.map(seat => ({ seat, name: sc.opponents[seat - 1].name, holding: S.seatRangeLabel(sc, seat, inf) })),
+    method: r.exact ? 'exact (every outcome)' : `simulated (${Math.round(r.trials)} deals)`,
+    against: live.map(seat => ({ seat, name: sc.opponents[seat - 1].name, holding: S.seatRangeLabel(sc, seat, s), read: sc.opponents[seat - 1].cards ? undefined : S.readOf(sc, seat, s).steps.map(x => x.text), likely: readTop(sc, seat, s) })),
     improves_to: r.list.filter(g => g.river / r.trials >= 0.01).slice(0, 5).map(g => ({ hand: g.label, by_river_pct: pct(g.river / r.trials * 100), wins_when_made_pct: pct(g.win / g.river * 100) })),
     pot: Math.round(m.potShow[s] * 100) / 100,
     to_call: Math.round(m.toCall[s] * 100) / 100,

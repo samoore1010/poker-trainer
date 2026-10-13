@@ -249,6 +249,27 @@
   .pv-row b.bad { color: var(--bad); } .pv-row b.mid { color: var(--warn); } .pv-row b.good { color: var(--good); }
   .pv-row small { font: 600 .74rem var(--mono); text-transform: none; letter-spacing: 0; }
 
+  /* Your read on a player */
+  .tabs #rangeTab { color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tabs #rangeTab .x { margin-left: 6px; opacity: .7; }
+  .rd-sum { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .rd-sum .big { font-size: 1.5rem; }
+  ol.rd-steps { margin: 0; padding-left: 1.2em; display: grid; gap: 5px; font-size: .8rem; }
+  ol.rd-steps .n { color: var(--muted); font-weight: 500; white-space: nowrap; }
+  .rg-grp { display: grid; gap: 5px; }
+  .rg-head { display: grid; grid-template-columns: minmax(0, 1fr) 42px; gap: 8px; align-items: center; font-size: .82rem; }
+  .rg-head b { font-weight: 600; }
+  .rg-head .v { font: 600 .8rem var(--mono); text-align: right; }
+  .rg-bar { height: 4px; background: var(--track); border-radius: 2px; overflow: hidden; grid-column: 1 / -1; }
+  .rg-bar i { display: block; height: 100%; background: var(--accent); }
+  .rcs { display: flex; flex-wrap: wrap; gap: 3px; }
+  .rc { display: inline-flex; gap: 1px; padding: 1px; border-radius: 4px; background: var(--line); }
+  .rc span { font: 600 .66rem var(--mono); padding: 1px 3px; border-radius: 3px; background: var(--card-face); color: var(--card-black); }
+  .rc span.red { color: var(--card-red); }
+  .rc.lo { opacity: .45; } .rc.mid { opacity: .72; }
+  .rcs .more { padding: 0 4px; }
+  .rd-legend { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: .7rem; color: var(--muted); }
+
   /* Advisor */
   .advisor { background: var(--panel); border-left: 1px solid var(--line); display: grid; grid-template-rows: auto 1fr; min-height: 0; }
   .tabs { display: flex; border-bottom: 1px solid var(--line); }
@@ -385,6 +406,7 @@
       <div class="tabs" role="tablist">
         <button role="tab" data-tab="read" aria-selected="true">Read</button>
         <button role="tab" data-tab="bets" aria-selected="false">Bets</button>
+        <button role="tab" data-tab="range" aria-selected="false" id="rangeTab" hidden></button>
         <button role="tab" data-tab="coach" aria-selected="false" id="coachTab" hidden>Coach</button>
       </div>
       <div class="pane" id="pane"></div>
@@ -396,6 +418,7 @@
 <script src="engine.js"></script>
 <script src="setup-parser.js"></script>
 <script src="strategy.js"></script>
+<script src="ranges.js"></script>
 <script src="scenario.js"></script>
 <script src="voice.js"></script>
 <script>
@@ -427,6 +450,7 @@
   let guesses = store.get('walkthrough.guesses') || [];
   let coachLog = [], lastReply = null;
   const undoStack = [];
+  let readSeat = null; const readOpen = new Set(); // the player whose range is open in the panel
   const num2 = x => String(Math.round(x * 100) / 100);
   // $ / BB display switch (remembered on this device)
   function setUnit(u) {
@@ -480,6 +504,8 @@
     const { scenario: clean } = SC.normalize(sc);
     scenario = clean; hand = materialize(scenario, opts.prev === undefined ? hand : opts.prev);
     step = scenario.street; cache = {}; gen++; guessed = {}; counted = {};
+    if (readSeat !== null && readSeat > scenario.opponents.length) closeRead();
+    else if (readSeat !== null) $('rangeTab').firstChild.textContent = `${scenario.opponents[readSeat - 1].name}'s range`;
     $('nOpp').value = String(scenario.opponents.length);
     if (document.activeElement !== $('blindsIn')) $('blindsIn').value = `${num2(scenario.smallBlind)}/${num2(scenario.bigBlind)}`;
     commitRevealed(); renderAll();
@@ -545,6 +571,7 @@
     return null;
   }
   function sim(s) {
+    if (cache['s' + s]) return cache['s' + s].result || null;
     const args = { hero: hand.hero, board: hand.board.slice(0, BOARD_N[s]), opps: SC.engineOpponents(scenario, s) };
     return job('s' + s, 'equity', { ...args, trials: BOARD_N[s] === 5 ? 6000 : 14000 }, { ...args, trials: 2000 });
   }
@@ -630,7 +657,7 @@
       const av = document.createElement('div'); av.className = 'av'; av.textContent = h.pos[seat]; av.title = `${SC.POS_NAMES[h.pos[seat]] || ''} · click to edit ${o.name}`; s.appendChild(av);
       const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = o.name; s.appendChild(nm);
       if (SC.effRange(o) || o.note) { const r = document.createElement('div'); r.className = 'rg'; r.textContent = o.range || cap(o.style || '') || ''; r.title = `${SC.rangeLabel(o)}${o.note ? ' — ' + o.note : ''}`; if (r.textContent) s.appendChild(r); }
-      else if (!o.cards && !folded && inf[seat]) { const r = document.createElement('div'); r.className = 'rg'; r.textContent = `~${Math.round(inf[seat].pct)}%`; r.title = `${cap(SC.seatRangeLabel(scenario, seat, inf))}, from what they did. Click the player to set your own read.`; s.appendChild(r); }
+      else if (!o.cards && !folded && inf[seat]) { const rd = SC.readOf(scenario, seat, s3), r = document.createElement('div'); r.className = 'rg'; r.textContent = `~${rd.pct >= 10 ? Math.round(rd.pct) : Math.round(rd.pct * 10) / 10}%`; r.title = `Your read: ${rd.summary}. Click the player to see the hands.`; s.appendChild(r); }
       const stEl = document.createElement('div'); stEl.className = 'st'; stEl.textContent = money(behind(seat)); s.appendChild(stEl);
       const act = document.createElement('div');
       if (step === 4) { act.className = 'act' + (folded ? ' fold' : ''); act.textContent = folded ? 'Folded' : describe(h.opps[i], h.board).short; }
@@ -910,7 +937,7 @@
       <div class="sp-row"><span class="sp-l">Plays</span><div class="sp-chips">${STYLE_CHIPS.map(([v, l]) => `<button type="button" data-sp-style="${v}" class="${!o.range && (o.style || '') === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
       <div class="sp-row"><span class="sp-l">Range</span><div class="sp-chips">${[8, 15, 25, 40].map(p => `<button type="button" data-sp-range="top ${p}%" class="${o.range === `top ${p}%` ? 'on' : ''}">Top ${p}%</button>`).join('')}</div></div>
       <form class="sp-range" data-sp-form><input name="range" value="${esc(o.range || '')}" placeholder="e.g. TT+, AQs+, AKo" aria-label="Range"><button type="submit">Set</button></form>
-      <p class="note">${o.cards ? `Known cards: ${o.cards.map(c => E.cardText(E.cardFromCode(c))).join(' ')}` : rp !== null ? `Holding: top ${rp}% of hands` : inf[seat] ? `Holding: ${esc(SC.seatRangeLabel(scenario, seat, inf))} (from what they did)` : 'Holding: any two cards until they act'}</p>
+      <p class="note">${o.cards ? `Known cards: ${o.cards.map(c => E.cardText(E.cardFromCode(c))).join(' ')}` : `Your read: ${esc(SC.seatRangeLabel(scenario, seat, Math.min(step, 3)))}. The hands are in the panel.`}</p>
       <div class="sp-row sp-btns"><button type="button" data-sp="cards">${o.cards ? 'Change cards' : 'Set their cards'}</button>${o.cards ? '<button type="button" data-sp="unknown">Make unknown</button>' : ''}<button type="button" data-sp="sit" title="Move yourself to this seat's position">Sit here</button></div>
       <div class="sp-row sp-btns">${seatBtns}</div>${stackRow(o.stack)}`;
     }
@@ -953,7 +980,7 @@
     if (e.target.closest('#dealerBtn')) { autoRun++; closeSeat(); closePicker(); edit('set_button', { seat: (scenario.button + 1) % (scenario.opponents.length + 1) }); return; }
     if (e.target.closest('#heroName')) { closePicker(); return seatEdit === 0 ? closeSeat() : openSeat(0); }
     const who = e.target.closest('.seat .av, .seat .nm');
-    if (who) { closePicker(); const seat = +who.closest('.seat').dataset.seat; return seatEdit === seat ? closeSeat() : openSeat(seat); }
+    if (who) { closePicker(); const seat = +who.closest('.seat').dataset.seat; showRead(seat); return seatEdit === seat ? closeSeat() : openSeat(seat); }
   });
   $('pickBtn').addEventListener('click', () => openPicker({ kind: 'hero', i: 0 }));
 
@@ -1208,8 +1235,7 @@
   }
   function rangeList(s) {
     const seats = liveSeats(s); if (!seats.length) return '';
-    const inf = SC.inferredRanges(scenario);
-    return `<ul class="opps">${seats.map(seat => { const o = scenario.opponents[seat - 1]; return `<li><b>${esc(o.name)}</b> <span class="note">${esc(hand.pos[seat])}</span> ${esc(SC.seatRangeLabel(scenario, seat, inf))}</li>`; }).join('')}</ul>`;
+    return `<ul class="opps">${seats.map(seat => { const o = scenario.opponents[seat - 1]; return `<li><b>${esc(o.name)}</b> <span class="note">${esc(hand.pos[seat])}</span> ${esc(SC.seatRangeLabel(scenario, seat, Math.min(s, 3)))} <button class="more" data-read="${seat}">See hands</button></li>`; }).join('')}</ul>`;
   }
   function topBlock(S, chance) {
     const h = hand, bd = board(), vs = vsLabel(step);
@@ -1227,6 +1253,7 @@
     const h = hand, nb = BOARD_N[step];
     let html = '';
     if (tab === 'coach') { $('pane').innerHTML = renderCoach(); const last = $('pane').lastElementChild; if (last) last.scrollIntoView({ block: 'end' }); return; }
+    if (tab === 'range' && readSeat !== null) { $('pane').innerHTML = renderRead(readSeat); return; }
     if (step === 4) {
       const full = h.board, d = describe(h.hero, full), w = winners();
       if (tab === 'read') {
@@ -1315,15 +1342,51 @@
     catch (e) { btn.textContent = '⚠'; btn.title = e.message || 'Could not play audio'; setTimeout(() => { btn.textContent = '🔊'; btn.title = 'Read aloud'; }, 4000); }
     finally { btn.disabled = false; }
   }
+  // ----- your read on a player: opens when you click a player, closes with × -----
+  function showRead(seat) {
+    readSeat = seat; readOpen.clear();
+    const t = $('rangeTab'); t.hidden = false;
+    t.innerHTML = `${esc(scenario.opponents[seat - 1].name)}'s range<span class="x" data-close-read title="Close" aria-label="Close">×</span>`;
+    setTab('range');
+  }
+  function closeRead() { readSeat = null; $('rangeTab').hidden = true; if (tab === 'range') setTab('read'); }
+  const comboEl = h => { const w = h[2]; return `<span class="rc${w < 0.4 ? ' lo' : w < 0.75 ? ' mid' : ''}" title="${E.cardText(h[0])}${E.cardText(h[1])} · ${Math.round(w * 100)}% as likely as their likeliest hands">${[h[0], h[1]].sort((a, b) => b - a).map(c => `<span class="${isRed(c) ? 'red' : ''}">${RANKS[rankOf(c)]}${SYM[suitOf(c)]}</span>`).join('')}</span>`; };
+  function renderRead(seat) {
+    const o = scenario.opponents[seat - 1], s3 = Math.min(step, 3), r = SC.readOf(scenario, seat, s3), m = hand.m;
+    const folded = m.foldedAt[seat] !== null && m.foldedAt[seat] <= s3;
+    let html = `<section class="blk"><h3>Your read on ${esc(o.name)} <small>${esc(hand.pos[seat])} · ${STEP[step].toLowerCase()}</small></h3>
+      <p class="note">What you should put them on from what you can see: their seat, the style you gave them, how they've bet, the board and your own cards. Their actual cards are never used.</p>`;
+    if (r.kind === 'known') { html += `<p>You set their cards: ${miniCards(o.cards.map(E.cardFromCode))}</p></section>`; return html; }
+    // your hand against this read (heads-up)
+    let eqTxt = '';
+    if (!folded) {
+      const res = job(`rd${seat}:${step}`, 'equity', { hero: hand.hero, board: board(), opps: [SC.engineOpponent(scenario, seat, s3)], trials: 5000 }, { hero: hand.hero, board: board(), opps: [SC.engineOpponent(scenario, seat, s3)], trials: 1500 });
+      eqTxt = `<span class="note">your hand wins <b class="n">${res ? pct(res.chance) : '…'}</b> against it</span>`;
+    }
+    html += `<div class="rd-sum"><span class="big">${r.pct >= 10 ? Math.round(r.pct) : Math.round(r.pct * 10) / 10}%<small>of all hands · about ${Math.round(r.n)} combos</small></span>${eqTxt}</div>`;
+    if (folded) html += `<p class="note">${esc(o.name)} folded on the ${STEP[m.foldedAt[seat]].toLowerCase()}; this is what they held until then.</p>`;
+    html += `<ol class="rd-steps">${r.steps.map(x => `<li>${esc(x.text)}${x.n !== null && x.n !== undefined ? ` <span class="n">→ ${Math.round(x.n)}</span>` : ''}</li>`).join('')}</ol></section>`;
+    const LIM = 30;
+    const groups = r.groups.map(g => {
+      const share = g.n / r.n * 100, open = readOpen.has(g.key), shown = open ? g.combos : g.combos.slice(0, LIM);
+      return `<div class="rg-grp"><div class="rg-head"><b>${esc(g.name)} <span class="note">${g.combos.length} combo${g.combos.length > 1 ? 's' : ''}</span></b><span class="v">${share < 1 ? '&lt;1' : Math.round(share)}%</span><div class="rg-bar"><i style="width:${Math.max(1, share)}%"></i></div></div>
+        <div class="rcs">${shown.map(comboEl).join('')}${g.combos.length > LIM ? `<button class="more" data-rg="${esc(g.key)}">${open ? 'Fewer' : `+${g.combos.length - LIM} more`}</button>` : ''}</div></div>`;
+    }).join('');
+    html += blk(`Their likely hands <small>${board().length >= 3 ? 'by what they make on this board' : 'by type'}</small>`, `${groups || '<p class="note">No hands left that fit.</p>'}<div class="rd-legend"><span>Each chip is one exact hand.</span><span><span class="rc"><span>A♠</span></span> likely</span><span><span class="rc mid"><span>A♠</span></span> less likely</span><span><span class="rc lo"><span>A♠</span></span> unlikely</span></div>`);
+    html += `<p class="note">A rule-of-thumb read, not a solver. To use your own read instead, click the player and pick a style or type a range.</p>`;
+    return html;
+  }
   function setTab(t) { tab = t; document.querySelectorAll('.tabs button').forEach(x => x.setAttribute('aria-selected', x.dataset.tab === t ? 'true' : 'false')); renderPane(); }
   $('pane').addEventListener('click', e => {
     const sp = e.target.closest('[data-speak]'); if (sp) { speakHand(sp); return; }
     const tg = e.target.closest('[data-tab-go]'); if (tg) { setTab(tg.dataset.tabGo); return; }
+    const rg = e.target.closest('[data-rg]'); if (rg) { readOpen.has(rg.dataset.rg) ? readOpen.delete(rg.dataset.rg) : readOpen.add(rg.dataset.rg); renderPane(); return; }
+    const sr = e.target.closest('[data-read]'); if (sr) { showRead(+sr.dataset.read); return; }
     const sg = e.target.closest('[data-suggest]'); if (sg) { $('askIn').value = sg.dataset.suggest; askAgent(sg.dataset.suggest); return; }
     if (e.target.closest('[data-clear-coach]')) { coachLog = []; lastReply = null; store.set('walkthrough.coach', []); renderPane(); return; }
     const b = e.target.closest('[data-more]'); if (!b) return; const box = $(b.dataset.more); const open = b.dataset.open === '1'; box.querySelectorAll('.row.hid, .row.was-hid').forEach(r => { r.classList.toggle('hid', open); r.classList.add('was-hid'); }); b.dataset.open = open ? '0' : '1'; b.textContent = open ? `Show ${b.dataset.n} more` : 'Show fewer';
   });
-  document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+  document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', e => { if (e.target.closest('[data-close-read]')) { closeRead(); return; } setTab(b.dataset.tab); }));
   document.addEventListener('keydown', e => { if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return; if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); $('nextBtn').click(); } if (e.key === 'ArrowLeft') go(step - 1); if (e.key.toLowerCase() === 'n') newHand(); if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); } });
 
   // Server features light up once /api/status answers (nothing changes when the page is opened from disk).

@@ -158,8 +158,15 @@
   const rangeCache = new Map();
   function rangeOf(text) { const k = String(text || '').trim().toLowerCase(); if (!rangeCache.has(k)) { if (rangeCache.size > 200) rangeCache.clear(); rangeCache.set(k, parseRange(text)); } return rangeCache.get(k); }
 
+  // An opponent's possible hands as [a, b, weight]: from weighted combos ({combos: [[a,b,w],...]}, a read) or a range
+  // string (all weight 1). isDead(card) removes hands that use a card already out.
+  function poolOf(o, isDead) {
+    if (Array.isArray(o.combos)) return o.combos.filter(h => h[2] > 0 && !isDead(h[0]) && !isDead(h[1]));
+    return rangeOf(o.range).combos.filter(([a, b]) => !isDead(a) && !isDead(b)).map(([a, b]) => [a, b, 1]);
+  }
+
   // ----- equity -----
-  // opts: {hero:[c,c], board:[...], opps:[{cards:[c,c]} | {range:"QQ+, AK"}], trials, exact:true|false|'auto'}
+  // opts: {hero:[c,c], board:[...], opps:[{cards:[c,c]} | {range:"QQ+, AK"} | {combos:[[a,b,weight],...]}], trials, exact:true|false|'auto'}
   // Opponents with known cards are fixed; the rest are drawn from their range (card removal respected).
   // Exact enumeration runs when one opponent is left and at most one card is to come; otherwise Monte Carlo.
   function equity(opts) {
@@ -173,38 +180,43 @@
       else ranged.push(o);
     }
     const pools = ranged.map(o => {
-      const r = rangeOf(o.range);
-      const pool = r.combos.filter(([a, b]) => !dead[a] && !dead[b]);
-      if (!pool.length) warnings.push(`No hands left in range "${r.label}" after removing known cards; treated as random.`);
-      return pool.length ? pool : rangeOf('').combos.filter(([a, b]) => !dead[a] && !dead[b]);
+      let pool = poolOf(o, c => dead[c]);
+      if (!pool.length) { warnings.push(`No hands left in ${o.combos ? 'that read' : `range "${rangeOf(o.range).label}"`} after removing known cards; treated as random.`); pool = poolOf({ range: '' }, c => dead[c]); }
+      // cumulative weights for drawing a hand in proportion to its weight
+      const cum = new Float64Array(pool.length); let t = 0; pool.forEach((h, i) => { t += h[2]; cum[i] = t; });
+      pool.cum = cum; pool.total = t;
+      return pool;
     });
+    const drawFrom = pool => { const x = Math.random() * pool.total; let lo = 0, hi = pool.length - 1; while (lo < hi) { const mid = (lo + hi) >> 1; if (pool.cum[mid] > x) hi = mid; else lo = mid + 1; } return pool[lo]; };
     const nOpp = fixed.length + ranged.length;
 
     const paths = new Map(), nowG = new Map(), rivG = new Map();
     let score = 0, weight = 0, noneN = 0, noneW = 0, nowBeat = 0, rivBeat = 0;
-    const bump = (m, k, ord) => { const g = m.get(k); if (g) g.n++; else m.set(k, { label: k, n: 1, ord }); };
-    function record(oppHands, run) {
+    let wt0 = 1; // weight of the deal being recorded
+    const bump = (m, k, ord) => { const g = m.get(k); if (g) g.n += wt0; else m.set(k, { label: k, n: wt0, ord }); };
+    function record(oppHands, run, wt = 1) {
       const full = run.length ? board.concat(run) : board;
       const hv = evalHand(hero.concat(full)); let best = -1, ties = 0, bestNow = -1;
       for (const oc of oppHands) {
         const v = evalHand(oc.concat(full)); if (v > best) { best = v; ties = 1; } else if (v === best) ties++;
         if (heroCur !== null && toCome) { const vn = evalHand(oc.concat(board)); if (vn > bestNow) bestNow = vn; }
       }
-      const w = hv > best ? 1 : hv === best ? 1 / (ties + 1) : 0; score += w; weight++;
-      if (heroCur !== null && toCome && bestNow > heroCur) { nowBeat++; bump(nowG, relLabel(bestNow, heroCur), catOrd(bestNow)); }
-      if (hv < best) { rivBeat++; bump(rivG, relLabel(best, hv), catOrd(best)); }
+      wt0 = wt;
+      const w = hv > best ? 1 : hv === best ? 1 / (ties + 1) : 0; score += w * wt; weight += wt;
+      if (heroCur !== null && toCome && bestNow > heroCur) { nowBeat += wt; bump(nowG, relLabel(bestNow, heroCur), catOrd(bestNow)); }
+      if (hv < best) { rivBeat += wt; bump(rivG, relLabel(best, hv), catOrd(best)); }
       const p = toCome ? pathOf(hero, full, curCat) : null;
-      if (p) { let g = paths.get(p.key); if (!g) { g = { ...p, river: 0, win: 0, flop: 0 }; paths.set(p.key, g); } g.river++; g.win += w; } else { noneN++; noneW += w; }
-      if (board.length === 0) { const pf = pathOf(hero, run.slice(0, 3), curCat); if (pf) { let g = paths.get(pf.key); if (!g) { g = { ...pf, river: 0, win: 0, flop: 0 }; paths.set(pf.key, g); } g.flop++; } }
+      if (p) { let g = paths.get(p.key); if (!g) { g = { ...p, river: 0, win: 0, flop: 0 }; paths.set(p.key, g); } g.river += wt; g.win += w * wt; } else { noneN += wt; noneW += w * wt; }
+      if (board.length === 0) { const pf = pathOf(hero, run.slice(0, 3), curCat); if (pf) { let g = paths.get(pf.key); if (!g) { g = { ...pf, river: 0, win: 0, flop: 0 }; paths.set(pf.key, g); } g.flop += wt; } }
     }
 
     const exact = opts.exact !== false && nOpp <= 1 && toCome <= 1;
     if (exact) {
       const hands = nOpp === 0 ? [null] : fixed.length ? [fixed[0]] : pools[0];
       for (const h of hands) {
-        const used = h ? [h[0], h[1]] : [];
-        if (!toCome) { record(h ? [h] : [], []); continue; }
-        for (let c = 0; c < 52; c++) if (!dead[c] && !used.includes(c)) record(h ? [h] : [], [c]);
+        const used = h ? [h[0], h[1]] : [], opp = h ? [[h[0], h[1]]] : [], wt = h && h.length > 2 ? h[2] : 1;
+        if (!toCome) { record(opp, [], wt); continue; }
+        for (let c = 0; c < 52; c++) if (!dead[c] && !used.includes(c)) record(opp, [c], wt);
       }
     } else {
       const flags = new Uint8Array(52), avail = new Array(52);
@@ -213,8 +225,8 @@
         const hands = fixed.slice();
         for (let i = 0; i < pools.length; i++) {
           const pool = pools[i]; let pick = null;
-          for (let tries = 0; tries < 40 && !pick; tries++) { const h = pool[rnd(pool.length)]; if (!flags[h[0]] && !flags[h[1]]) pick = h; }
-          if (!pick) { const left = pool.filter(([a, b]) => !flags[a] && !flags[b]); pick = left.length ? left[rnd(left.length)] : null; }
+          for (let tries = 0; tries < 40 && !pick; tries++) { const h = drawFrom(pool); if (!flags[h[0]] && !flags[h[1]]) pick = [h[0], h[1]]; }
+          if (!pick) { const left = pool.filter(([a, b]) => !flags[a] && !flags[b]); pick = left.length ? left[rnd(left.length)].slice(0, 2) : null; }
           if (!pick) { const free = []; for (let c = 0; c < 52; c++) if (!flags[c]) free.push(c); shuffle(free); pick = [free[0], free[1]]; }
           flags[pick[0]] = flags[pick[1]] = 1; hands.push(pick);
         }
@@ -241,10 +253,10 @@
     // Per opponent: share of their possible hands that beats you, overall and per group.
     const shares = (opps || []).map(o => {
       if (o.cards && o.cards.length === 2) { const [a, b] = o.cards[0] < o.cards[1] ? o.cards : [o.cards[1], o.cards[0]]; const k = beats.get(a * 52 + b); return { total: 1, by: k ? { [k]: 1 } : {}, beat: k ? 1 : 0 }; }
-      const pool = rangeOf(o.range).combos.filter(([a, b]) => !used.has(a) && !used.has(b));
-      const by = {}; let beat = 0;
-      for (const [a, b] of pool) { const k = beats.get(a * 52 + b); if (k) { by[k] = (by[k] || 0) + 1; beat++; } }
-      return { total: pool.length || 1, by, beat };
+      const pool = poolOf(o, c => used.has(c));
+      const by = {}; let beat = 0, total = 0;
+      for (const [a, b, w] of pool) { total += w; const k = beats.get(a < b ? a * 52 + b : b * 52 + a); if (k) { by[k] = (by[k] || 0) + w; beat += w; } }
+      return { total: total || 1, by, beat };
     });
     const any = fracs => (1 - fracs.reduce((p, f) => p * (1 - f), 1)) * 100;
     g.forEach((x, k) => { x.desc = describeCombos(x.combos); x.pNow = any(shares.map(s => (s.by[k] || 0) / s.total)); x.inRange = shares.some(s => s.by[k]); });
@@ -387,7 +399,7 @@
     RANKS, SUITS, SYM, RN, RP, SN, CATN, DECK, ORDER, PCT, STYLES, B, M,
     rankOf, suitOf, rnd, shuffle, cap, cardFromCode, codeOf, cardText,
     evalHand, cat, describe, preflopShort, pathOf, curCatOf, relLabel, catOrd, handLabel,
-    combosOfClass, parseRange, rangeOf, equity, threatsNow, describeCombos, nextCardGroups, winChanceQuick, handCards,
+    combosOfClass, parseRange, rangeOf, poolOf, equity, threatsNow, describeCombos, nextCardGroups, winChanceQuick, handCards,
     texture, drawOuts, openPct, recommend,
   };
 });
