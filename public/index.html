@@ -312,6 +312,20 @@
   .cam-body.folded .cam-view { position: absolute; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
   .cam-info { display: grid; gap: 4px; min-width: 0; }
   .cam-btnrow { display: flex; gap: 6px; flex-wrap: wrap; }
+  .cam-btnrow .cam-syncbtn { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: var(--accent); font-weight: 600; }
+  .cam-ready { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: .74rem; }
+  .cam-ready .ok { color: var(--good); } .cam-ready .no { color: var(--bad); } .cam-ready .un { color: var(--muted); }
+  .cam-ready .why { flex: 1 1 100%; color: var(--muted); }
+  .cam-sync { display: grid; gap: 6px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); font-size: .8rem; }
+  .cam-sync[hidden] { display: none; }
+  .cam-sync.err { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
+  .cam-sync b { font: 600 .7rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .cam-sync label { display: flex; gap: 7px; align-items: center; min-width: 0; }
+  .cam-sync .items { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 3px 12px; max-height: 132px; overflow: auto; }
+  .cam-sync .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .cam-sync .row button { padding: 4px 12px; font-size: .78rem; }
+  .seat.camflash .plate, .hero.camflash .plate { animation: camflash 1.8s ease-out; }
+  @keyframes camflash { 0%, 40% { box-shadow: 0 0 0 3px #5fc38a, 0 0 18px 4px rgba(95,195,138,.6); } 100% { box-shadow: 0 4px 10px rgba(0,0,0,.5); } }
   .cam-btnrow button { padding: 3px 9px; font-size: .74rem; background: transparent; }
   .cam-read { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-size: .8rem; min-height: 22px; }
   .cam-read b { font: 600 .66rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-right: 3px; }
@@ -396,6 +410,11 @@
   .timeline .pt .v { font: 600 .95rem var(--mono); }
   ul { margin: 0; padding-left: 1.1em; display: grid; gap: 5px; font-size: .84rem; }
 
+  /* desktop: the table fits the space left above the bottom panel, however tall the panel gets */
+  @media (min-width: 861px) {
+    .tablewrap { container-type: size; }
+    .table { width: min(100cqw, calc((100cqh - 6px) * 1.9)); }
+  }
   @media (max-width: 860px) {
     body { overflow: auto; } .app { height: auto; }
     .main { grid-template-columns: 1fr; }
@@ -465,11 +484,13 @@
           </div>
           <div class="cam-on" id="camOn" hidden>
             <div class="cam-head"><span class="cam-live"><i class="cam-dot" id="camDot"></i>Live</span><label title="Put the cards the camera reads on this table"><input type="checkbox" id="camAuto" checked> Update the table</label><label class="cam-opt" id="camBetsRow" hidden title="The AI also reads who folded, the chips in front of each player and whose turn it is; the betting is filled in only when it all adds up"><input type="checkbox" id="camBets"> Read the betting</label></div>
+            <div class="cam-ready" id="camReady"></div>
+            <div class="cam-sync" id="camSyncBox" hidden></div>
             <div class="cam-body" id="camBody">
               <div class="cam-view" id="camView"><video id="camVideo" playsinline muted autoplay></video><canvas id="camOverlay"></canvas></div>
               <div class="cam-info"><div class="cam-read" id="camRead"></div><p class="note" id="camNote">Starting the camera…</p></div>
             </div>
-            <div class="cam-btnrow"><button type="button" class="ghost" id="camFold" aria-expanded="true">▴ Hide view</button><button type="button" class="ghost" id="camReread" title="Unlock the cards and read the table from scratch">Re-read</button><button type="button" class="ghost" id="camClose">■ Stop</button></div>
+            <div class="cam-btnrow"><button type="button" class="cam-syncbtn" id="camSync" hidden title="One careful read of the whole table: players, names, stacks, the dealer, the betting and the cards. You see what would change before anything does.">⟳ Sync table</button><button type="button" class="ghost" id="camFold" aria-expanded="true">▴ Hide view</button><button type="button" class="ghost" id="camReread" title="Unlock the cards and read the table from scratch">Re-read</button><button type="button" class="ghost" id="camClose">■ Stop</button></div>
           </div>
         </section>
         <section class="playdock">
@@ -716,6 +737,7 @@
     if (s === 0 && snap && snap.contrib[seat] > 0) return { text: `${hand.pos[seat]} ${money(snap.contrib[seat])}`, cls: 'blind' };
     return { text: '', cls: 'empty' };
   }
+  const flashing = seat => !!cam.flash && Date.now() < cam.flash.until && cam.flash.seats.has(seat);
   function renderTable() {
     const h = hand, nb = BOARD_N[step], bd = board(), m = h.m, s3 = Math.min(step, 3), snap = m.street[s3];
     const hidden = scenario.heroHidden && step < 4;
@@ -754,7 +776,7 @@
     $('heroAct').className = 'act you' + (turn === 0 || over ? '' : heroLast.cls === 'blind' ? ' empty' : heroLast.text ? ' ' + heroLast.cls : live ? '' : ' empty');
     $('heroAct').textContent = over ? (m.foldedAt[0] !== null ? 'You folded' : w.includes(0) ? (w.length > 1 ? 'Split pot' : 'You win') : step === 4 ? 'Showdown' : 'Hand over')
       : turn === 0 ? (m.toCall[step] > 0 ? `Your turn · ${money(m.toCall[step])} to call` : 'Your turn') : heroLast.text || (live ? 'Waiting' : '');
-    heroEl.classList.toggle('turn', turn === 0); heroEl.classList.toggle('folded', heroDone); heroEl.classList.toggle('win', over && w.includes(0));
+    heroEl.classList.toggle('turn', turn === 0); heroEl.classList.toggle('folded', heroDone); heroEl.classList.toggle('win', over && w.includes(0)); heroEl.classList.toggle('camflash', flashing(0));
     document.querySelectorAll('.seat').forEach(e => e.remove());
     const tb = $('table'), inf = SC.inferredRanges(scenario);
     // the dealer button: click it to move it one seat on
@@ -766,7 +788,7 @@
     dEl.setAttribute('aria-label', dEl.title);
     scenario.opponents.forEach((o, i) => {
       const seat = i + 1, folded = m.foldedAt[seat] !== null && m.foldedAt[seat] <= s3, p = seatPos(seat);
-      const s = document.createElement('div'); s.className = 'seat' + (over && w.includes(seat) ? ' win' : '') + (folded ? ' folded' : '') + (turn === seat ? ' turn' : '');
+      const s = document.createElement('div'); s.className = 'seat' + (over && w.includes(seat) ? ' win' : '') + (folded ? ' folded' : '') + (turn === seat ? ' turn' : '') + (flashing(seat) ? ' camflash' : '');
       s.style.left = p.x + '%'; s.style.top = p.y + '%'; s.dataset.seat = seat;
       // speech bubble: the latest action (on showdown, the hand)
       const act = document.createElement('div');
@@ -1164,7 +1186,7 @@
   //    they match the picture. Otherwise the betting is left for you to enter.
   const cam = { stream: null, timer: 0, canvas: null, four: false, seen: [], local: null, localKey: '', localSince: 0, lock: null,
     prevThumb: null, thumbNow: null, asked: null, still: 0, needCheck: false, ai: { busy: false, last: 0, calls: 0, fails: 0, offUntil: 0 },
-    conflict: null, ignore: '', betNote: '' };
+    conflict: null, ignore: '', betNote: '', betAt: 0, sync: null, synced: false, plan: null, syncMsg: null, syncBusy: false, quality: null, qAt: 0, flash: null };
   const cardsTxt = cs => cs.map(c => E.cardText(E.cardFromCode(c))).join(' ');
   const sameCards = (a, b) => !!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]);
   const readKey = r => `${r.hero ? r.hero.join(' ') : '-'}|${r.board ? r.board.join(' ') : '?'}`;
@@ -1295,6 +1317,7 @@
   }
   // The betting the AI saw → the missing actions on this table, when (and only when) they add up.
   function followSeen(A) {
+    if (!cam.synced) { cam.betNote = 'Betting: press ⟳ Sync table first so the seats match the camera.'; return; }
     const B = A.betting;
     if (!B || !A.board) { cam.betNote = 'Betting: not clear in the picture. Enter it with the action buttons.'; return; }
     const pos = SC.positions(scenario), noAction = scenario.streets.every(st => !st.actions.length);
@@ -1305,14 +1328,92 @@
     const res = SC.followBetting(scenario, B, BOARD_N.indexOf(A.board.length));
     if (!res.ok) { cam.betNote = `Betting not followed: ${res.error}. Enter it with the action buttons.`; return; }
     if (!res.log.length) { if (!cam.betNote || /not followed|not clear/.test(cam.betNote)) cam.betNote = 'Betting: up to date.'; return; }
+    const had = scenario.streets.map(st => st.actions.length);
     autoRun++; pushUndo(); loadScenario(res.sc); syncLock();
-    cam.betNote = `Betting: ${res.log.join(' · ')}.`;
+    flashSeats(scenario.streets.flatMap((st, k) => st.actions.slice(had[k]).map(a => a.seat)));
+    cam.betNote = `Betting: ${res.log.join(' · ')}.`; cam.betAt = Date.now();
   }
+
+  // ----- Sync table: one careful read of the whole table -----
+  // The AI reads every seat (name, stack, dealer, betting) and the cards, saying which parts it could read clearly.
+  // You see what would change and tick what to apply; anything it couldn't read stays as you set it.
+  async function syncTable() {
+    if (!cam.canvas || cam.syncBusy) return;
+    cam.syncBusy = true; cam.plan = null; cam.syncMsg = null; renderSyncBox();
+    const q = cam.quality && !cam.quality.ok ? ` (the picture looks ${cam.quality.issues.join(' and ')}, so this may not work)` : '';
+    if (q) camNote(`Reading the whole table…${q}`); $('camSync').disabled = true;
+    try {
+      const T = await HV.api.request('/api/cards/table', { body: JSON.stringify({ image: cam.canvas.toDataURL('image/jpeg', 0.9) }), headers: { 'Content-Type': 'application/json' } });
+      cam.ai.calls++; cam.sync = T;
+      if (!T.readable.seats) { cam.synced = false; cam.syncMsg = { err: true, text: `The camera couldn't read the seats clearly, so everything stays manual${T.problems.length ? `: ${T.problems.join('; ')}` : ''}. Move closer or straighten the camera, then sync again.` }; return; }
+      const items = SC.syncPlan(scenario, T);
+      if (!items.length) { cam.synced = true; cam.syncMsg = { text: 'The table already matches the camera.' }; afterSync(T); return; }
+      cam.plan = { T, items, picked: new Set(items.map(x => x.id)) };
+    } catch (e) { cam.syncMsg = { err: true, text: `Sync failed (${e.message}). The table stays as it is.` }; }
+    finally { cam.syncBusy = false; $('camSync').disabled = false; renderSyncBox(); renderCamRead(); }
+  }
+  function applySyncPlan() {
+    const P = cam.plan; if (!P) return;
+    autoRun++; closePicker(); pushUndo();
+    const done = SC.applySync(scenario, P.T, [...P.picked]);
+    cam.plan = null; cam.synced = true; loadScenario(scenario); syncLock();
+    flashSeats([0].concat(scenario.opponents.map((_, i) => i + 1)));
+    afterSync(P.T);
+    cam.syncMsg = { text: done.length ? `Synced: ${done.join(', ')}.` : 'Nothing applied.' };
+    renderSyncBox(); renderCamRead();
+  }
+  // the cards and the betting from the same reading go the usual way (betting first, as with the AI check)
+  function afterSync(T) {
+    if (bettingOn()) { const B = SC.syncBetting(scenario, T); if (B) followSeen({ board: T.board, betting: B }); }
+    if (T.readable.cards && (T.hero || (T.board && T.board.length))) decide({ hero: T.hero, board: T.board }, 'ai');
+  }
+  function renderSyncBox() {
+    const box = $('camSyncBox'), P = cam.plan, M = cam.syncMsg;
+    box.hidden = !P && !M && !cam.syncBusy;
+    box.classList.toggle('err', !P && !!M && !!M.err);
+    if (!P) { box.innerHTML = cam.syncBusy ? '<span class="calc">Reading the whole table…</span>' : M ? `<span>${esc(M.text)}</span><div class="row"><button type="button" data-sync="cancel">OK</button></div>` : ''; return; }
+    box.innerHTML = `<b>The camera sees · ${P.items.length} change${P.items.length > 1 ? 's' : ''}</b><div class="items">${P.items.map(x => `<label><input type="checkbox" data-sync-id="${esc(x.id)}"${P.picked.has(x.id) ? ' checked' : ''}> ${esc(x.text)}</label>`).join('')}</div>`
+      + (P.T.problems.length ? `<span class="note">Left as is: ${esc(P.T.problems.join('; '))}</span>` : '')
+      + `<div class="row"><button type="button" class="primary" data-sync="apply">Apply</button><button type="button" data-sync="cancel">Cancel</button></div>`;
+  }
+  $('camSyncBox').addEventListener('change', e => { const c = e.target.closest('[data-sync-id]'); if (!c || !cam.plan) return; c.checked ? cam.plan.picked.add(c.dataset.syncId) : cam.plan.picked.delete(c.dataset.syncId); });
+  $('camSyncBox').addEventListener('click', e => {
+    const b = e.target.closest('[data-sync]'); if (!b) return;
+    if (b.dataset.sync === 'apply') applySyncPlan(); else { cam.syncMsg = cam.plan ? { text: 'Sync cancelled; the table stays as it is.' } : null; cam.plan = null; renderSyncBox(); }
+  });
+  $('camSync').addEventListener('click', syncTable);
+  // What the camera can read: the picture itself (checked on the phone every second) and, after a sync, each part of the table.
+  function renderReady() {
+    const T = cam.sync, Q = cam.quality, ai = HV && HV.api.has('vision');
+    const mark = (label, v, why) => `<span class="${v === true ? 'ok' : v === false ? 'no' : 'un'}"${why ? ` title="${esc(why)}"` : ''}>${label} ${v === true ? '✓' : v === false ? '✗' : '–'}</span>`;
+    let html = mark('Picture', Q ? Q.ok : null, Q && Q.issues.join(', '));
+    if (ai) html += ['cards', 'seats', 'names', 'stacks', 'betting'].map(k => mark(k[0].toUpperCase() + k.slice(1), T ? T.readable[k] : null)).join('');
+    const why = Q && !Q.ok ? `The picture looks ${Q.issues.join(' and ')}.` : !ai ? '' : !T ? 'Press ⟳ Sync table to check what the camera can read.' : T.problems.length ? `Not readable: ${T.problems.join('; ')}.` : '';
+    if (why) html += `<span class="why">${esc(why)}</span>`;
+    $('camReady').innerHTML = html;
+  }
+  // A quick look at the picture: too dark, washed out, blurry, or the cards too small to read.
+  function pictureCheck(px, W, H, r) {
+    let sum = 0, sq = 0, edge = 0, n = 0;
+    for (let y = 2; y < H - 2; y += 4) for (let x = 2; x < W - 6; x += 4) {
+      const i = (y * W + x) * 4, L = (px[i] * 77 + px[i + 1] * 150 + px[i + 2] * 29) >> 8, R = (px[i + 4] * 77 + px[i + 5] * 150 + px[i + 6] * 29) >> 8;
+      sum += L; sq += L * L; edge += Math.abs(R - L); n++;
+    }
+    const mean = sum / n, sd = Math.sqrt(Math.max(0, sq / n - mean * mean)), sharp = edge / n / Math.max(1, sd), issues = [];
+    if (mean < 45) issues.push('too dark');
+    else if (sd < 22) issues.push('washed out');
+    if (sd >= 22 && sharp < 0.035) issues.push('blurry');
+    const cw = r && r.cards.length ? r.cards.reduce((t, c) => t + Math.min(c.w, c.h), 0) / r.cards.length / Math.max(W, H) : null;
+    if (cw !== null && cw < 0.018) issues.push('too far away (the cards are tiny)');
+    return { ok: !issues.length, issues };
+  }
+  // Seats the camera just changed glow for a moment.
+  function flashSeats(seats) { cam.flash = { seats: new Set(seats), until: Date.now() + 1800 }; renderTable(); setTimeout(() => { if (cam.flash && Date.now() >= cam.flash.until) { cam.flash = null; renderTable(); } }, 1900); }
 
   // ----- the camera loop -----
   async function startCamera() {
     $('camOff').hidden = true; $('camOn').hidden = false; camNote('Starting the camera… allow access if your browser asks.');
-    $('camBetsRow').hidden = !(HV && HV.api.has('vision'));
+    $('camBetsRow').hidden = $('camSync').hidden = !(HV && HV.api.has('vision'));
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camNote(window.isSecureContext ? 'This browser has no camera access.' : 'The camera needs a secure (https) page.', true); return; }
     try {
       await CardVision.init();
@@ -1323,14 +1424,14 @@
     }
     const v = $('camVideo'); v.srcObject = cam.stream; try { await v.play(); } catch (e) {}
     $('camDot').classList.add('on');
-    Object.assign(cam, { seen: [], four: false, local: null, lock: null, asked: null, prevThumb: null, conflict: null, ignore: '', needCheck: false, betNote: '' });
+    Object.assign(cam, { seen: [], four: false, local: null, lock: null, asked: null, prevThumb: null, conflict: null, ignore: '', needCheck: false, betNote: '', sync: null, synced: false, plan: null, quality: null });
     camNote('Point it at the table so the cards fill most of the picture. Hold steady.');
     renderCamRead(); camLoop();
   }
   function stopCamera() {
     clearTimeout(cam.timer); cam.timer = 0;
     if (cam.stream) cam.stream.getTracks().forEach(t => t.stop());
-    cam.stream = null; $('camVideo').srcObject = null; $('camDot').classList.remove('on'); $('camOn').hidden = true; $('camOff').hidden = false;
+    cam.stream = null; $('camVideo').srcObject = null; $('camDot').classList.remove('on'); $('camOn').hidden = true; $('camOff').hidden = false; cam.plan = null; cam.syncMsg = null; cam.synced = false; renderSyncBox();
   }
   function camLoop() {
     if (!cam.stream) return;
@@ -1344,6 +1445,7 @@
       let r = null; try { r = CardVision.analyze(px, W, H, { fourColor: cam.four }); } catch (e) { console.warn(e); }
       if (r && r.fourColor && !cam.four) cam.four = true; // the screen being filmed uses a four-colour deck: suits are read by colour
       if (r) { drawCamOverlay(r); onFrame(r, updateThumb(px, W, H)); }
+      if (Date.now() - cam.qAt > 1000) { cam.qAt = Date.now(); cam.quality = pictureCheck(px, W, H, r); }
     }
     cam.timer = setTimeout(camLoop, Math.max(30, 120 - (performance.now() - t0)));
   }
@@ -1374,12 +1476,13 @@
     const mark = srcs => (!ai ? '' : srcs.some(x => x === 'fast') ? ' <span class="note" title="AI check pending">⋯</span>' : srcs.length ? ' <span class="cam-ok" title="Confirmed">✓</span>' : '');
     let html = `<span><b>You</b>${lh ? `🔒 ${esc(cardsTxt(lh))}${mark([cam.lock.hero])}` : '<span class="note">waiting</span>'}</span><span><b>Board</b>${lb.length ? `🔒 ${esc(cardsTxt(lb))}${mark(cam.lock.board)}` : '<span class="note">none yet</span>'}</span>`;
     html += `<span class="note cam-ai">${ai ? `AI check · ${cam.ai.calls} call${cam.ai.calls === 1 ? '' : 's'}` : HV && HV.api.has('vision') ? 'AI check paused' : 'On-device only'}${cam.ai.busy ? ' · checking…' : ''}</span>`;
-    if (bettingOn() && cam.betNote) html += `<span class="note cam-bet">${esc(cam.betNote)}</span>`;
+    if (bettingOn() && cam.betNote) html += `<span class="note cam-bet">${esc(cam.betNote)}${cam.betAt ? ` <span title="When the camera last changed the betting">· ${Math.round((Date.now() - cam.betAt) / 1000)} s ago</span>` : ''}</span>`;
     if (cam.conflict) {
       const c = cam.conflict;
       html += `<div class="cam-conflict">The camera reads ${c.kind === 'hero' ? 'your cards' : 'the board'} as <b>${esc(cardsTxt(c.cards))}</b>; the table has ${esc(cardsTxt(c.was))}. <span class="cam-btns"><button type="button" data-cam="use">Use the camera's</button><button type="button" data-cam="keep">Keep</button></span></div>`;
     }
     $('camRead').innerHTML = html;
+    renderReady();
   }
   $('camRead').addEventListener('click', e => {
     const b = e.target.closest('[data-cam]'); if (!b || !cam.conflict) return;
@@ -1392,7 +1495,7 @@
   });
   $('camReread').addEventListener('click', () => { syncLock(); cam.lock.hero = null; cam.lock.board = []; cam.conflict = null; cam.ignore = ''; cam.asked = null; cam.localKey = ''; cam.seen = []; camNote('Reading the table again…'); renderCamRead(); });
   $('camBets').checked = !!store.get('walkthrough.camBets');
-  $('camBets').addEventListener('change', () => { store.set('walkthrough.camBets', $('camBets').checked); cam.betNote = ''; cam.asked = null; renderCamRead(); });
+  $('camBets').addEventListener('change', () => { store.set('walkthrough.camBets', $('camBets').checked); cam.betNote = cam.synced ? '' : 'Betting: press ⟳ Sync table first so the seats match the camera.'; cam.betAt = 0; cam.asked = null; renderCamRead(); });
   // Boxes over the preview: gold = your cards, green = the board, grey = other cards, dashed = not sure yet.
   function drawCamOverlay(r) {
     if ($('camBody').classList.contains('folded')) return;

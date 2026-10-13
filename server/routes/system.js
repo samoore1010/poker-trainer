@@ -10,7 +10,7 @@ module.exports = function systemRoutes(router, { config, openai, agent, vision }
     features: { transcribe: openai.configured, parseCards: openai.configured, speak: openai.configured, agent: !!agent, vision: !!vision },
     models: openai.configured ? openai.models : null,
     agent: agent ? { provider: agent.name, model: agent.model } : null,
-    vision: vision ? { provider: vision.name, model: vision.model } : null,
+    vision: vision ? { provider: vision.name, model: vision.model, syncModel: vision.syncModel } : null,
     limits: { maxAudioMb: Math.round(config.maxAudioBytes / 1048576), ratePerMin: config.rateLimitPerMin },
   }));
 };
