@@ -76,6 +76,16 @@ Betting is played turn by turn in real table order (preflop from under the gun t
 
 Chips slide in front of each player as they bet and sweep into the pot when the street ends. **Auto ▸** lets the opponents play until it's your turn: preflop they play the same charts (raise or fold), loosened or tightened by style (stations and fish call more, maniacs and LAGs raise more); after the flop they play their actual cards with their style. **Play to the flop/turn/river** finishes the betting round (you check/call) and deals the next card. On your turn the button the "What you should do" gauge recommends is starred. Folding ends the hand for you; Undo takes back any action. The stats, the gauge and the coach all use the actual action: who is still in, the pot, what you have to call, who raised and who called.
 
+## Camera (experimental)
+
+📷 **Camera** reads the cards on another table through your phone's camera and puts them on this one, as if you'd tapped them in. For now it's built for this app's own cards: point the phone at another screen running the app.
+
+- **What it reads:** the row of 3–5 cards in the middle of the table is the board (left to right = flop, turn, river); the larger pair below it is your hand. When the board goes away, or both of your cards change, it starts a new hand.
+- **How:** entirely in the browser, nothing uploaded and no model to download (`public/vision.js`). It finds the white card faces, straightens them (tilt is fine), reads the rank in the top-left corner and the suit in the bottom-right against templates drawn with the same fonts, and only changes the table once the same reading has held for three frames (about half a second). Each change lands roughly a second after the other screen changes.
+- **Preview:** gold boxes are your cards, green the board; dashed boxes and a "?" mean it isn't sure yet and won't change anything.
+- **Best results:** turn on **4-color deck** (top bar) on the screen being filmed: diamonds turn blue and clubs green, so suits are read by colour, which survives blur and dim light. With the usual two colours, ♠ and ♣ are told apart by shape and can be confused when the picture is dim, washed out or far away. Fill most of the picture with the table and hold steady.
+- **Needs** a secure (https) page, which Railway provides, and camera permission.
+
 ## Voice
 
 - 🎙 records in the page with a level meter, stops after a pause, and transcribes with OpenAI. In the card picker plain card names are parsed instantly; anything else goes to an AI card parser. In the coach bar the transcript goes to the agent.
@@ -105,6 +115,7 @@ public/
   scenario.js        the scenario record and the edit operations (shared)
   stats-worker.js    runs the engine off the main thread
   voice.js           HandVoice: recorder + level meter, API client, speak()
+  vision.js          CardVision: finds and reads cards in a camera frame (browser only)
 server/
   index.js · config.js · app.js · http.js · rateLimit.js · openai.js
   agent/
