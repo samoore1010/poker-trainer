@@ -713,6 +713,50 @@
       return { ok: true, summary: `New hand${a.keep_ranges ? ' (players kept)' : ''}` };
     },
   };
+  // ----- following the betting a camera saw -----
+  // seen: {players, heroPosition, toAct, unit, seats: {POS: {folded, bet (chips in on this street), last}}}; street = the
+  // street the picture shows (0 preflop … 3 river). On a copy, plays the actions this table is missing, in turn order:
+  // earlier streets are finished first (anyone shown folded folds, the rest check or call), then on this street each
+  // player goes to the chips in front of them (fold / check / call / bet or raise) until it's the shown player's turn.
+  // The copy is kept only if it matches the picture: each seat's latest action and whose turn it is.
+  // → {ok: true, sc, log: [text]} or {ok: false, error}
+  function followBetting(sc, seen, street) {
+    const w = clone(sc), pos = positions(w), players = pos.length, log = [];
+    if (!seen || !seen.seats) return { ok: false, error: 'no betting in the reading' };
+    if (seen.players !== players || seen.heroPosition !== pos[0]) return { ok: false, error: `the table on camera has ${seen.players} players with you in ${seen.heroPosition}; this one has ${players} with you in ${pos[0]}` };
+    const k = seen.unit === 'bb' ? w.bigBlind : 1, info = seat => { const x = seen.seats[pos[seat]]; return x && { ...x, bet: x.bet * k }; };
+    const near = (a, b) => Math.abs(a - b) < 0.01 * Math.max(1, w.bigBlind);
+    const act = (seat, action, amount) => { const r = apply(w, 'act', { seat, action, amount }); if (r.ok) log.push(r.summary.replace(/^\w+: /, '')); return r.ok; };
+    const stuck = seat => ({ ok: false, error: `couldn't play ${pos[seat]}'s action` });
+    for (let guard = 0; guard < 80; guard++) {
+      const m = money(w);
+      if (m.ended || m.frontier > street || m.next === null) break;
+      const s = m.frontier, snap = m.street[s], seat = m.next, x = info(seat);
+      if (!x) return { ok: false, error: `no reading for ${pos[seat]}` };
+      if (s < street) { if (!act(seat, x.folded ? 'fold' : snap.max > snap.contrib[seat] ? 'call' : 'check')) return stuck(seat); continue; }
+      if (pos[seat] === seen.toAct || x.last === 'none' || x.last === 'post') break; // their turn, or they haven't acted yet
+      if (x.folded || x.last === 'fold') { if (!act(seat, 'fold')) return stuck(seat); continue; }
+      if (x.bet > snap.max && !near(x.bet, snap.max)) { if (!act(seat, snap.max > 0 ? 'raise' : 'bet', x.bet)) return stuck(seat); continue; }
+      if (near(x.bet, snap.max) || x.last === 'all-in') { if (!act(seat, snap.max > snap.contrib[seat] ? 'call' : 'check')) return stuck(seat); continue; }
+      return { ok: false, error: `${pos[seat]} shows ${round(x.bet)} in, less than the ${round(snap.max)} to call` };
+    }
+    // check the result against the picture
+    const m = money(w);
+    if (!m.ended && m.frontier === street) {
+      const snap = m.street[street];
+      for (let seat = 0; seat < players; seat++) {
+        const x = info(seat); if (!x) continue;
+        const shown = x.last === 'bet' ? 'raise' : x.last;
+        if (shown === 'fold') { if (m.foldedAt[seat] === null) return { ok: false, error: `${pos[seat]} is shown folded but works out still in` }; continue; }
+        if (!['check', 'call', 'raise'].includes(shown)) continue;
+        const mine = snap.actions.filter(a => a.seat === seat).pop(), t = mine ? (mine.type === 'bet' ? 'raise' : mine.type) : null;
+        if (t !== shown && !(mine && mine.allIn)) return { ok: false, error: `${pos[seat]} shows "${x.last}" but the betting works out to ${t ? `"${t}"` : 'nothing yet'}` };
+      }
+      if (seen.toAct && m.next !== pos.indexOf(seen.toAct)) return { ok: false, error: `it should be ${seen.toAct}'s turn but works out to ${m.next === null ? 'nobody' : pos[m.next]}'s` };
+    }
+    return { ok: true, sc: w, log };
+  }
+
   function apply(sc, name, args) {
     if (!ops[name]) return { ok: false, error: `Unknown action ${name}` };
     try { return ops[name](sc, args || {}); } catch (e) { return { ok: false, error: e.message }; }
@@ -838,5 +882,5 @@
     };
   }
 
-  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, readOf, engineOpponent, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, setUnit, getUnit, fmt };
+  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, readOf, engineOpponent, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, followBetting, setUnit, getUnit, fmt };
 });

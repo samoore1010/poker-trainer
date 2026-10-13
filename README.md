@@ -80,11 +80,13 @@ Chips slide in front of each player as they bet and sweep into the pot when the 
 
 📷 **Camera** follows the cards on another table through your phone's camera and puts them on this one, as if you'd tapped them in. Today it's tested by pointing a phone at another screen running this app.
 
-- **Locked in.** Within a hand your two cards never change and the board only grows (flop, then turn, then river), so a confirmed card stays put (🔒 in the camera panel). A hand passing over the table, glare or one bad frame can't swap it. When the camera disagrees with a locked card it asks instead of changing anything: **Use the camera's** or **Keep**. A new hand (the board cleared, or two new cards) unlocks everything; **Re-read** does it by hand. Cards you pick yourself count as confirmed.
-- **Hybrid reading.** On the phone, `public/vision.js` reads cards in every frame and a small thumbnail notices when the picture changes and settles. When it does, one frame goes to a vision model (`POST /api/cards/vision`: Claude when `ANTHROPIC_API_KEY` is set, `claude-haiku-5-5` unless `VISION_MODEL` says otherwise; else OpenAI). If the model and the phone agree, it applies; if they disagree, it asks the model once more and goes with the majority. Because the model is only asked when something changes, a hand costs about 5–10 checks (the panel counts them). The model reads any deck or table style; the phone's own reader only knows this app's cards and is a second opinion.
+- **Fast first.** The phone reads every frame itself (`public/vision.js`); a reading that holds for a few frames (about half a second) goes straight onto the table and locks (🔒). Your cards show up about a second after they're dealt, each street about half a second after it lands.
+- **AI check in the background.** A vision model then looks at the same picture (`POST /api/cards/vision`: Claude when `ANTHROPIC_API_KEY` is set, `claude-haiku-5-5` unless `VISION_MODEL` says otherwise; else OpenAI). ⋯ means the check is pending, ✓ that it agreed. If it disagrees with a card the fast reading put there, it reads again and, only if both readings agree, corrects that card. It reads any deck or table style, so when the phone can't read the cards at all (a different design) the AI's reading goes on the table directly, a second or two later.
+- **Locked in.** Within a hand your two cards never change and the board only grows, so later frames can't swap a locked card. Cards the AI confirmed or that you picked are never changed automatically: if the AI disagrees with one it asks (**Use the camera's** / **Keep**). A new hand (the board cleared, or two new cards) unlocks everything; **Re-read** does it by hand.
+- **Read the betting (beta, needs the AI).** The AI also reports who folded, the chips in front of each seat and whose turn it is. The phone plays the missing actions in turn order and keeps them only if the result matches the picture: each seat's latest action and whose turn it is. If it doesn't add up (or the camera shows a different table size or seat), the betting is left for you to enter with the action buttons, and the panel says why. At the start of a hand it matches this table to the one on camera (players and your seat).
+- **Cost:** the AI is only asked when something changes: about 5–10 calls a hand for cards, roughly one per action with the betting on (the panel counts them).
 - **No vision model** (no keys, or it's failing): the phone's reading alone is used, with the same locking.
-- **Preview:** gold boxes are your cards, green the board; dashed boxes and a "?" mean the phone isn't sure.
-- **Best results:** fill most of the picture with the table and hold steady. With the phone's reader, the **4-color deck** setting (top bar) on the filmed screen makes suits much more reliable.
+- **Best results:** fill most of the picture with the table and hold steady. The **4-color deck** setting (top bar) on the filmed screen makes the phone's own suit reading much more reliable.
 - **Needs** a secure (https) page, which Railway provides, and camera permission.
 
 ## Voice
@@ -139,7 +141,7 @@ test/                node:test suites
 | `POST /api/agent` | `{message, scenario, history?}` | `{reply, scenario, changes, stats, provider, model}`; with `Accept: application/x-ndjson`, a stream of `status` / `scenario` events then `done` |
 | `POST /api/transcribe?context=cards\|none` | raw audio (`audio/webm`, mp4, ogg, wav, mp3) | `{text}` |
 | `POST /api/cards/parse` | `{text}` | `{hero, flop, turn, river, unclear}` |
-| `POST /api/cards/vision` | `{image: "data:image/jpeg;base64,…", player?}` | `{board, hero, unsure, provider, model}` (`board` null = unreadable, `hero` null = not seen) |
+| `POST /api/cards/vision` | `{image: "data:image/jpeg;base64,…", player?, betting?}` | `{board, hero, betting, unsure, provider, model}` (`board` null = unreadable, `hero` null = not seen; `betting` only when asked and readable) |
 | `POST /api/speak` | `{text, voice?}` | `audio/mpeg` |
 
 Errors are `{"error": {"code", "message"}}`. With `ACCESS_CODE` set, send it as `X-Access-Code`.

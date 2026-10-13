@@ -199,10 +199,19 @@ test('vision: rejects a missing image and answers 503 without any model', async 
 });
 
 test('vision: answers are cleaned: no repeats, a board of 0/3/4/5 and a hand of 0/2', () => {
-  assert.deepEqual(normalizeVision({ board: ['Kh', '7h', '2c', '9s'], hero: [], unsure: [] }), { board: ['Kh', '7h', '2c', '9s'], hero: null, unsure: [] });
+  assert.deepEqual(normalizeVision({ board: ['Kh', '7h', '2c', '9s'], hero: [], unsure: [] }), { board: ['Kh', '7h', '2c', '9s'], hero: null, betting: null, unsure: [] });
   const twice = normalizeVision({ board: ['Kh', '7h', '2c'], hero: ['Kh', 'Ad'], unsure: [] });
   assert.equal(twice.hero, null); assert.match(twice.unsure.join(), /twice/);
   assert.equal(normalizeVision({ board: ['Kh', '7h'], hero: ['As', 'Ad'], unsure: [] }).board, null);
   assert.equal(normalizeVision({ board: [], hero: ['As'], unsure: [] }).hero, null);
   assert.equal(normalizeVision({ board: ['Zz', '7h', '2c'], hero: [], unsure: [] }).board, null);
+});
+
+test('vision: betting is passed through only when it adds up', () => {
+  const seats = [{ position: 'UTG', folded: false, in_front: 6, last_action: 'raise' }, { position: 'BB', folded: false, in_front: 2, last_action: 'post' }];
+  const ok = normalizeVision({ board: [], hero: ['As', 'Kd'], unsure: [], betting: { readable: true, players: 2, hero_position: 'BB', to_act: 'BB', unit: 'chips', seats } });
+  assert.deepEqual(ok.betting, { players: 2, heroPosition: 'BB', toAct: 'BB', unit: 'chips', seats: { UTG: { folded: false, bet: 6, last: 'raise' }, BB: { folded: false, bet: 2, last: 'post' } } });
+  assert.equal(normalizeVision({ board: [], hero: [], unsure: [], betting: { readable: false, players: 2, hero_position: 'BB', to_act: 'BB', unit: 'chips', seats } }).betting, null);
+  assert.equal(normalizeVision({ board: [], hero: [], unsure: [], betting: { readable: true, players: 3, hero_position: 'BB', to_act: 'BB', unit: 'chips', seats } }).betting, null);
+  assert.equal(normalizeVision({ board: [], hero: [], unsure: [], betting: { readable: true, players: 2, hero_position: 'BB', to_act: 'CO', unit: 'chips', seats } }).betting, null);
 });
