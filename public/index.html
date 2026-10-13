@@ -99,15 +99,15 @@
   .hero .plate { min-width: 112px; }
 
   /* Progression bar */
-  .prog { position: relative; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px 16px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
-  .steps { display: flex; align-items: center; gap: 0; min-width: 0; overflow: hidden; }
+  .prog { position: relative; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+  .steps { flex: 1 1 380px; display: flex; align-items: center; gap: 0; min-width: 0; overflow: hidden; }
   .steps button { border: 0; background: none; padding: 4px 6px; display: grid; justify-items: center; gap: 4px; font: 600 .68rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); min-width: 64px; }
   .steps button i { display: block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line); background: var(--panel); }
   .steps button.done i { background: var(--fg); border-color: var(--fg); }
   .steps button.on { color: var(--fg); } .steps button.on i { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224,103,79,.3); }
   .steps .seg { flex: 1; height: 2px; background: var(--line); min-width: 10px; }
   .steps .seg.done { background: var(--fg); }
-  .ctl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .ctl { flex: 1 1 auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
   .ctl .hint { font-size: .78rem; color: var(--muted); margin-right: 4px; }
   .ctl button.ghost { background: transparent; }
   .ctl button[aria-expanded="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
@@ -170,6 +170,11 @@
   .gauge span:nth-child(3) { background: color-mix(in srgb, var(--good) 75%, transparent); border-radius: 0 6px 6px 0; }
   .gauge i { position: absolute; top: -5px; bottom: -5px; width: 4px; margin-left: -2px; border-radius: 2px; background: var(--fg); box-shadow: 0 0 0 2px var(--panel); transition: left .25s ease; }
   .adv-why { font-size: .8rem; }
+  .adv-hand { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 2px; padding: 9px 12px; border-radius: 8px; background: color-mix(in srgb, var(--fg) 7%, transparent); }
+  .adv-hand .hn { display: grid; gap: 1px; min-width: 0; }
+  .adv-hand .hn b { font: 600 1.15rem var(--body); }
+  .adv-hand .pc { font: 600 2.1rem var(--mono); line-height: 1; font-variant-numeric: tabular-nums; }
+  .blk.wait button { justify-self: start; }
 
   /* Chips in front of the players */
   .bets { position: absolute; inset: 0; pointer-events: none; }
@@ -189,7 +194,7 @@
   .act.empty { visibility: hidden; }
   .card.dim { opacity: .4; }
   /* Action bar, under the table: Fold · Check/Call · Bet/Raise (which opens the sizing: presets, a slider, Confirm) */
-  .actbar { grid-column: 1 / -1; display: grid; gap: 8px; width: 100%; max-width: 760px; justify-self: center; }
+  .actbar { flex: 1 1 100%; display: grid; gap: 8px; width: 100%; max-width: 760px; margin: 0 auto; }
   .actbar[hidden] { display: none; }
   .ab-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; font: 600 .7rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
   .actbar.you .ab-head > span:first-child { color: var(--fg); }
@@ -401,7 +406,6 @@
     .card.lg { width: 54px; height: 76px; } .card.lg .r { font-size: 1.2rem; } .card.lg .s { font-size: 1.6rem; } .slot { width: 38px; height: 54px; }
     .board { gap: 4px; }
     .ab { padding: 12px 6px; font-size: 1rem; } .ab.ab-pre { padding: 10px 2px; font-size: .82rem; }
-    .prog { grid-template-columns: 1fr; }
     .steps button { min-width: 48px; font-size: .6rem; }
   }
 </style>
@@ -451,7 +455,9 @@
           <button class="primary" id="nextBtn">Show the flop</button>
           <button class="ghost" id="pickBtn" title="Or tap any card on the table">Edit cards</button>
           <button class="ghost" id="camBtn" title="Point your camera at a table: the cards it sees go on this one">📷 Camera</button>
-          <button id="dealBtn">New hand</button>
+          <button class="ghost" id="randBtn" hidden title="Deal yourself two random cards">🎲 Random cards</button>
+          <button id="dealBtn" title="Pays the pot, moves the dealer button one seat on and deals the next hand: same players, stacks carried over">Next hand</button>
+          <button class="ghost" id="resetBtn" title="Start over: new players, fresh stacks, hand 1">Reset table</button>
         </div>
       </div>
     </div>
@@ -501,7 +507,7 @@
   const miniCards = cs => `<span class="mini">${cs.map(c => `<span class="${isRed(c) ? 'red' : ''}">${RANKS[rankOf(c)]}${SYM[suitOf(c)]}</span>`).join('')}</span>`;
   const STEP = ['Preflop', 'Flop', 'Turn', 'River', 'Showdown'];
   const BOARD_N = SC.BOARD_N;
-  const NEXT = ['Show the flop', 'Show the turn', 'Show the river', 'Show all cards', 'Deal a new hand'];
+  const NEXT = ['Show the flop', 'Show the turn', 'Show the river', 'Show all cards', 'Next hand'];
   const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
 
   // ----- state -----
@@ -580,7 +586,24 @@
     if (!res.ok) { if (opts.undo !== false) { undoStack.pop(); $('undoBtn').disabled = !undoStack.length; } return res; }
     loadScenario(scenario); return res;
   }
-  function newHand() { pendingFlop = [null, null, null]; autoRun++; pushUndo(); lastReply = null; SC.apply(scenario, 'new_hand', { keep_ranges: true }); loadScenario(scenario, { prev: null }); }
+  // Next hand at the same table: whatever's left of this hand is played out (you check/call unless you folded), the pot
+  // goes to the winner(s), stacks carry over, the button moves on, and your new cards stay face down until they're read.
+  let lastResult = store.get('walkthrough.lastResult');
+  function nextHand() {
+    pendingFlop = [null, null, null]; pendingHero = [null, null]; autoRun++; pushUndo(); lastReply = null;
+    const res = SC.settleHand(scenario, { hero: hand.hero, opps: hand.opps, board: hand.board });
+    const who = i => (i === 0 ? 'You' : scenario.opponents[i - 1].name), net = res.stacks[0] - scenario.hero.stack;
+    lastResult = { hand: scenario.handNo, text: `${res.winners.map(who).join(' and ')} ${res.winners.length > 1 ? 'split' : res.winners[0] === 0 ? 'win' : 'wins'} ${money(res.won.reduce((a, b) => a + b, 0))}${res.showdown ? ' at showdown' : ''}`, net };
+    store.set('walkthrough.lastResult', lastResult);
+    SC.apply(scenario, 'next_hand', { stacks: res.stacks });
+    loadScenario(scenario, { prev: null });
+  }
+  function resetTable() {
+    pendingFlop = [null, null, null]; pendingHero = [null, null]; autoRun++; pushUndo(); lastReply = null; lastResult = null; store.set('walkthrough.lastResult', null);
+    const n = scenario.opponents.length, bb = scenario.bigBlind;
+    loadScenario(SC.create({ opponents: n, bigBlind: bb, smallBlind: scenario.smallBlind, stack: 100 * bb }), { prev: null });
+  }
+  function randomCards() { pendingHero = [null, null]; autoRun++; edit('set_hero_cards', { cards: hand.hero.map(E.codeOf) }); }
 
   const board = () => hand.board.slice(0, BOARD_N[step]);
   const liveSeats = s => hand.m.liveAfter[Math.min(s, 3)].filter(x => x > 0);
@@ -678,7 +701,8 @@
   }
   function renderTable() {
     const h = hand, nb = BOARD_N[step], bd = board(), m = h.m, s3 = Math.min(step, 3), snap = m.street[s3];
-    const bEl = $('board'); bEl.innerHTML = ''; const g = glowSet(h.hero, bd);
+    const hidden = scenario.heroHidden && step < 4;
+    const bEl = $('board'); bEl.innerHTML = ''; const g = hidden ? new Set() : glowSet(h.hero, bd);
     if (step !== 0) pendingFlop = [null, null, null];
     for (let i = 0; i < 5; i++) {
       let el;
@@ -698,7 +722,16 @@
     $('heroStack').textContent = money(behind(0));
     $('heroAv').textContent = h.pos[0];
     const hp = seatPos(0), heroEl = $('hero'); heroEl.style.left = hp.x + '%'; heroEl.style.top = hp.y + '%';
-    const hc = $('heroCards'); hc.innerHTML = ''; h.hero.forEach((c, i) => { const el = cardEl(c, 'lg editable' + (g.has(c) ? ' glow' : '') + (m.foldedAt[0] !== null && m.foldedAt[0] <= s3 ? ' dim' : '')); el.dataset.slot = 'hero:' + i; el.title = 'Change this card'; hc.appendChild(el); });
+    const hc = $('heroCards'); hc.innerHTML = '';
+    h.hero.forEach((c, i) => {
+      let el;
+      if (hidden) { // face down until the camera reads them or you pick them
+        el = pendingHero[i] !== null ? cardEl(pendingHero[i], 'lg editable pending') : Object.assign(document.createElement('div'), { className: 'card lg back editable' });
+        el.title = 'Pick this card (or let the camera read it)';
+      } else { el = cardEl(c, 'lg editable' + (g.has(c) ? ' glow' : '') + (m.foldedAt[0] !== null && m.foldedAt[0] <= s3 ? ' dim' : '')); el.title = 'Change this card'; }
+      el.dataset.slot = 'hero:' + i; hc.appendChild(el);
+    });
+    $('randBtn').hidden = !hidden;
     const live = isLive(), turn = live ? m.next : null;
     const heroLast = seatAction(0, step), heroDone = m.foldedAt[0] !== null && m.foldedAt[0] <= s3;
     $('heroAct').className = 'act you' + (turn === 0 || over ? '' : heroLast.cls === 'blind' ? ' empty' : heroLast.text ? ' ' + heroLast.cls : live ? '' : ' empty');
@@ -744,9 +777,9 @@
     renderActionBar();
     $('steps').innerHTML = STEP.map((s, i) => `<button data-step="${i}" class="${i === step ? 'on' : i < step ? 'done' : ''}" ${i > SC.viewLimit(scenario) && !(i === step + 1 && !m.ended) ? 'disabled' : ''}><i></i>${s}</button>` + (i < 4 ? `<span class="seg ${i < step ? 'done' : ''}"></span>` : '')).join('');
     const ended = (m.ended && step >= m.ended.street) || (heroOut() && step >= m.foldedAt[0]);
-    $('nextBtn').textContent = step === 4 || ended ? 'Deal a new hand' : live ? (m.next === 0 ? `Check/call to the ${STEP[step + 1].toLowerCase()}` : `Play to the ${STEP[step + 1].toLowerCase()}`) : NEXT[step];
+    $('nextBtn').textContent = step === 4 || ended ? 'Next hand' : live ? (m.next === 0 ? `Check/call to the ${STEP[step + 1].toLowerCase()}` : `Play to the ${STEP[step + 1].toLowerCase()}`) : NEXT[step];
     $('backBtn').disabled = step === 0;
-    $('hint').textContent = ended ? (m.ended && m.ended.winner === 0 ? 'Everyone folded. You win.' : m.foldedAt[0] !== null ? 'You folded.' : 'Hand over.') : step === 4 ? 'Hand over.' : live ? `${m.next === 0 ? 'Your' : esc(h.names[m.next - 1]) + "'s"} turn` : nb < 5 ? `${5 - nb} card${nb === 4 ? '' : 's'} to come` : 'All cards out';
+    $('hint').textContent = `Hand ${scenario.handNo} · ` + (ended ? (m.ended && m.ended.winner === 0 ? 'Everyone folded. You win.' : m.foldedAt[0] !== null ? 'You folded.' : 'Hand over.') : step === 4 ? 'Hand over.' : live ? `${m.next === 0 ? 'Your' : esc(h.names[m.next - 1]) + "'s"} turn` : nb < 5 ? `${5 - nb} card${nb === 4 ? '' : 's'} to come` : 'All cards out');
   }
 
   // ----- chips in front of the players -----
@@ -836,6 +869,7 @@
     bar.classList.toggle('you', you);
   }
   function heroRec() {
+    if (scenario.heroHidden) return null;
     const S = sim(step); if (!S) return null;
     try { return SC.recommendation(scenario, step, hand.hero, board(), S); } catch (e) { return null; }
   }
@@ -894,11 +928,11 @@
   // there (rank, then suit — or type "ah"); the change applies in place and the stats update. Nothing is re-dealt.
   // Board spots past the current street fill the next street: three flop cards move the table to the flop, and so on.
   const PK_RANKS = 'AKQJT98765432'.split(''), PK_SUITS = [['s', '♠'], ['h', '♥'], ['d', '♦'], ['c', '♣']];
-  let edit_ = null, pickRank = null, pendingFlop = [null, null, null];
+  let edit_ = null, pickRank = null, pendingFlop = [null, null, null], pendingHero = [null, null]; // pendingHero: your cards picked one at a time while they're face down
   const slotKey = s => s.kind === 'opp' ? `opp:${s.seat}:${s.i}` : `${s.kind}:${s.i}`;
   const parseSlot = k => { const [kind, a, b] = k.split(':'); return kind === 'opp' ? { kind, seat: +a, i: +b } : { kind, i: +a }; };
   function slotCard(s) {
-    if (s.kind === 'hero') return hand.hero[s.i];
+    if (s.kind === 'hero') return scenario.heroHidden ? pendingHero[s.i] : hand.hero[s.i];
     if (s.kind === 'opp') return hand.opps[s.seat - 1][s.i];
     if (s.i < BOARD_N[step]) return hand.board[s.i];
     return s.i < 3 ? pendingFlop[s.i] : null;
@@ -906,7 +940,8 @@
   // Cards fixed somewhere else in the hand (can't be picked for this spot). Hidden cards don't count: they re-deal around you.
   function fixedElsewhere(s) {
     const out = new Set(), own = slotCard(s);
-    scenario.hero.cards.forEach(c => out.add(E.cardFromCode(c)));
+    if (!scenario.heroHidden) scenario.hero.cards.forEach(c => out.add(E.cardFromCode(c)));
+    pendingHero.forEach(c => c !== null && out.add(c));
     scenario.board.forEach(c => out.add(E.cardFromCode(c)));
     hand.board.slice(0, BOARD_N[step]).forEach(c => out.add(c));
     scenario.opponents.forEach(o => (o.cards || []).forEach(c => out.add(E.cardFromCode(c))));
@@ -949,6 +984,14 @@
   // Applies one picked card (int) to the spot being edited, or null for "back to random". Returns the next spot to fill.
   function applyCard(s, c) {
     const codes = cs => cs.map(E.codeOf);
+    if (s.kind === 'hero' && scenario.heroHidden) {
+      // face down: keep the first card you pick until you've picked both
+      if (c === null) { pendingHero[s.i] = null; renderTable(); return null; }
+      pendingHero[s.i] = c; const other = pendingHero[1 - s.i];
+      if (other === null) { renderTable(); return { kind: 'hero', i: 1 - s.i }; }
+      const cards = pendingHero.slice(); pendingHero = [null, null];
+      edit('set_hero_cards', { cards: codes(cards) }); return null;
+    }
     if (s.kind === 'hero') {
       if (c === null) { edit('set_hero_cards', { cards: [] }); return null; }
       const cards = hand.hero.slice(); cards[s.i] = c;
@@ -1163,7 +1206,7 @@
   }
   function applyPlan(p, src) {
     autoRun++; closePicker(); const done = [];
-    if (p.newHand) { newHand(); syncLock(); done.push('new hand'); }
+    if (p.newHand) { nextHand(); syncLock(); done.push('next hand'); }
     if (p.hero) { if (!sameCards(p.hero, scenario.hero.cards)) edit('set_hero_cards', { cards: p.hero }); syncLock(); cam.lock.hero = src; done.push(`your cards ${cardsTxt(p.hero)}`); }
     if (p.board) {
       const old = lockedBoard(), olds = cam.lock.board.slice();
@@ -1592,19 +1635,19 @@
       // not your turn: what to do when the action reaches you
       const first = r.preview[0];
       const rows = r.preview.map(p => `<div class="pv-row"><span>${esc(p.when)}</span><b class="${ACT_CLS[p.action]}">${esc(p.label)}${p.sizeText ? ` <small>${esc(p.sizeText)}</small>` : ''}</b></div>`).join('');
-      return `<section class="blk advice ${cls}"><h3>What you should do <small>rule of thumb, not a solver</small></h3>
+      return `<section class="blk advice ${cls}"><h3 title="A rule of thumb, not a solver">What you should do</h3>
         <div class="adv-top"><span class="adv-act">${esc(r.label)}</span></div>
         <p class="note">${esc(r.reasons[0] || '')}</p>
         <div class="pv">${rows || '<p class="note">Nothing to decide until the others act.</p>'}</div>
         ${first ? `<div class="gauge" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${first.gauge}" aria-label="${esc(first.when)}: from fold to raise"><span>Fold</span><span>Check · Call</span><span>Bet · Raise</span><i style="left:${first.gauge}%"></i></div>
-        <ul class="adv-why">${first.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}${r.note ? `<p class="note">${esc(r.note)}</p>` : ''}</section>`;
+        <ul class="adv-why">${first.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}${r.note ? `<p class="note">${esc(r.note)}</p>` : ''}${handLine(S)}</section>`;
     }
     const pot = hand.m.potShow[step];
     const size = !r.size ? '' : r.action === 'raise' ? `to ${money(r.size)}` : `${money(r.size)} · about ${Math.round(r.size / pot * 100)}% of the pot`;
-    return `<section class="blk advice ${cls}"><h3>What you should do <small>rule of thumb, not a solver</small></h3>
+    return `<section class="blk advice ${cls}"><h3 title="A rule of thumb, not a solver">What you should do</h3>
       <div class="adv-top"><span class="adv-act">${esc(r.label)}</span>${size ? `<span class="adv-size">${size}</span>` : ''}${r.close ? '<span class="chip">close call</span>' : ''}</div>
       <div class="gauge" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${r.gauge}" aria-label="Recommendation strength from fold to raise"><span>Fold</span><span>Check · Call</span><span>Bet · Raise</span><i style="left:${r.gauge}%"></i></div>
-      <ul class="adv-why">${r.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>${r.note ? `<p class="note">${esc(r.note)}</p>` : ''}</section>`;
+      <ul class="adv-why">${r.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>${r.note ? `<p class="note">${esc(r.note)}</p>` : ''}${handLine(S)}</section>`;
   }
   function rangeList(s) {
     const seats = liveSeats(s); if (!seats.length) return '';
@@ -1622,6 +1665,22 @@
     const warn = S && S.warnings && S.warnings.length ? `<p class="note err">${esc(S.warnings.join(' '))}</p>` : '';
     return blk('Your hand' + spk, `<div class="top"><div class="l1"><span class="hn">${hn}</span><span class="pc">${pct(chance)}</span></div><div class="l2"><span>${odds(chance)} · ${vs}${how}</span>${g}</div></div>${warn}`);
   }
+  // Your hand and your chance to win, at the foot of "What you should do".
+  function handLine(S) {
+    const h = hand, chance = S ? S.chance : null, vs = vsLabel(step);
+    const name = step === 0 ? preflopShort(h.hero) : (d => `${cap(d.text)}${d.shared ? ' <span class="chip hot">shared</span>' : ''}`)(describe(h.hero, board()));
+    const top = step === 0 ? `top ${Math.round(PCT[handLabel(h.hero[0], h.hero[1])])}% of starting hands · ` : '';
+    if (chance === null) return `<div class="adv-hand"><div class="hn"><b>${name}</b><span class="note">${top}calculating ${vs}</span></div><span class="pc calc">…</span></div>`;
+    if (guessed[step] != null && !counted[step]) { counted[step] = true; guesses.push(guessed[step] - chance); if (guesses.length > 100) guesses.shift(); store.set('walkthrough.guesses', guesses); }
+    const g = guessed[step] != null ? ` · guess ${Math.round(guessed[step])}%, off by ${Math.round(Math.abs(guessed[step] - chance))}` : '';
+    const spk = HV && HV.api.has('speak') ? ' <button class="spk" data-speak aria-label="Read this hand aloud" title="Read aloud">🔊</button>' : '';
+    const warn = S.warnings && S.warnings.length ? `<p class="note err">${esc(S.warnings.join(' '))}</p>` : '';
+    return `<div class="adv-hand"><div class="hn"><b>${name}${spk}</b><span class="note">${top}${odds(chance)} · ${vs}${S.exact ? ' · exact' : ''}${g}</span></div><span class="pc" title="Your chance to win">${pct(chance)}</span></div>${warn}`;
+  }
+  function waitingBlock() {
+    const last = lastResult && lastResult.hand === scenario.handNo - 1 ? `<p class="note">Last hand: ${esc(lastResult.text)}${lastResult.net ? ` (you ${lastResult.net > 0 ? '+' : '−'}${money(Math.abs(lastResult.net))})` : ''}.</p>` : '';
+    return `<section class="blk wait"><h3>Hand ${scenario.handNo} · your cards</h3><p>Face down until the camera reads them. Tap them on the table to pick them, or</p><button class="primary" data-random>🎲 Random cards</button>${last}</section>`;
+  }
   function renderPane() {
     const h = hand, nb = BOARD_N[step];
     let html = '';
@@ -1633,34 +1692,34 @@
         html += `<div class="big">${w.includes(0) ? (w.length > 1 ? 'Split' : 'Won') : 'Lost'}<small>${d.text}</small></div>`;
         html += `<h3>Chance to win, by street</h3><div class="timeline">${[0, 1, 2, 3].map(s => { const c = chanceFor(s); return `<div class="pt"><span class="k">${STEP[s]}</span><span class="v">${c === null ? '…' : pct(c)}</span></div>`; }).join('')}</div>`;
         html += `<h3>Hands</h3><ul>${scenario.opponents.map((o, i) => { const folded = h.m.foldedAt[i + 1] !== null; return `<li><b>${esc(o.name)}</b> ${folded ? '<span class="note">folded</span>' : `${miniCards(h.opps[i])} ${describe(h.opps[i], full).text}${w.includes(i + 1) ? ' ← winner' : ''}`}</li>`; }).join('')}</ul>`;
-      } else html += `<p class="note">Hand over. Deal again, or use Back to revisit a street.</p>`;
+      } else html += `<p class="note">Hand over. Next hand, or use Back to revisit a street.</p>`;
       $('pane').innerHTML = html; return;
     }
     const m = h.m;
     if (((m.ended && step >= m.ended.street) || (heroOut() && step >= m.foldedAt[0])) && tab === 'read') {
       const youWin = !!m.ended && m.ended.winner === 0, youFolded = m.foldedAt[0] !== null;
       html += `<div class="big">${youWin ? 'Won' : youFolded ? 'Folded' : 'Over'}<small>${youWin ? `Everyone else folded. You take ${money(m.potFinal)}.` : youFolded ? `You folded on the ${STEP[m.foldedAt[0]].toLowerCase()} with ${money(m.contrib[0])} in the pot.` : `${esc(h.names[m.ended.winner - 1])} takes ${money(m.potFinal)}.`}</small></div>`;
-      html += '<p class="note">Deal a new hand, or Undo to take the last action back.</p>';
+      html += '<p class="note">Next hand when you\'re ready, or Undo to take the last action back.</p>';
       $('pane').innerHTML = html; return;
     }
+    if (scenario.heroHidden && tab === 'read') { html += waitingBlock(); if (anyRanges(step)) html += blk('Opponents', rangeList(step)); $('pane').innerHTML = html; return; }
     if (needGuess()) { $('pane').innerHTML = topBlock(null, 0) + guessHist(); $('guessBtn').addEventListener('click', revealGuess); $('guessIn').addEventListener('keydown', e => { if (e.key === 'Enter') revealGuess(); }); $('guessIn').focus(); sim(step); return; }
-    const S = sim(step), chance = S ? S.chance : null;
+    const S = scenario.heroHidden ? null : sim(step), chance = S ? S.chance : null;
     if (tab === 'read') {
-      if (step !== m.frontier) html += blk('What you should do', `<p class="note">Betting on the ${STEP[step].toLowerCase()} is finished. Go to the ${STEP[Math.min(m.frontier, 4)].toLowerCase()} for advice on your next decision.</p>`);
-      else html += S ? adviceBlock(S) : blk('What you should do', '<p class="note calc">Reading the spot…</p>');
-      html += topBlock(S, chance);
+      if (step !== m.frontier) html += blk('What you should do', `<p class="note">Betting on the ${STEP[step].toLowerCase()} is finished. Go to the ${STEP[Math.min(m.frontier, 4)].toLowerCase()} for advice on your next decision.</p>${handLine(S)}`);
+      else html += S ? adviceBlock(S) : blk('What you should do', `<p class="note calc">Reading the spot…</p>${handLine(S)}`);
       const vs = vsLabel(step), live = liveSeats(step).length;
-      if (!S) html += blk('Working', '<p class="note calc">Running the numbers…</p>');
+      if (!S) { /* the numbers are on their way */ }
       else if (step === 0) {
         html += blk('Starting hand chart', preflopGrid(h.hero));
         html += blk('Chance to win by number of opponents', oppStrip());
-        html += blk(`Where this hand ends up <small>${vs}</small>`, improvementRows(S, nb) + `<p class="note">Rows are the hand you finish with. "Wins" is how often that finished hand takes the pot.</p>`);
+        html += blk(`Where this hand ends up <small>${vs}</small>`, improvementRows(S, nb), 'Rows are the hand you finish with. "Wins" is how often that finished hand takes the pot.');
       } else {
         if (nb < 5) {
-          if (S.list.length) html += blk(`Where this hand ends up <small>${vs}</small>`, improvementRows(S, nb) + `<p class="note">Rows are the hand you finish with. "Wins" is how often that finished hand takes the pot.</p>`);
+          if (S.list.length) html += blk(`Where this hand ends up <small>${vs}</small>`, improvementRows(S, nb), 'Rows are the hand you finish with. "Wins" is how often that finished hand takes the pot.');
           else html += blk('Where this hand ends up', `<p class="note">No card to come can improve this hand. It wins ${pct(chance)} as it stands.</p>`);
         }
-        if (live) html += blk(`What beats you <small>now ${pct(nb < 5 ? S.nowBeat : 100 - chance)}${nb < 5 ? ` · by river ${pct(S.rivBeat)}` : ''}</small>`, threatRows(S, nb) + `<p class="note">"Now": chance at least one live opponent${anyRanges(step) ? ', given their likely hands,' : ''} already holds it.${nb < 5 ? ' "By river": chance you lose to it once all cards are out.' : ''}</p>`);
+        if (live) html += blk(`What beats you <small>now ${pct(nb < 5 ? S.nowBeat : 100 - chance)}${nb < 5 ? ` · by river ${pct(S.rivBeat)}` : ''}</small>`, threatRows(S, nb), `"Now": chance at least one live opponent${anyRanges(step) ? ', given their likely hands,' : ''} already holds it.${nb < 5 ? ' "By river": chance you lose to it once all cards are out.' : ''}`);
       }
       if (anyRanges(step)) html += blk('Opponents', rangeList(step));
       html += guessHist();
@@ -1670,11 +1729,11 @@
       const rows = [];
       if (owe > 0) rows.push({ b: owe, label: `Calling ${snap.lastAgg ? esc(h.names[snap.lastAgg - 1]) + "'s bet" : 'the bet'}`, need: owe / (pot + owe) * 100, live: true, after: pot + owe });
       [[0.5, 'Half pot'], [1, 'Pot'], [2, 'Double pot']].forEach(([f, l]) => { const b = Math.round(pot * f); rows.push({ b, label: `If someone bets ${l.toLowerCase()}`, need: b / (pot + 2 * b) * 100, after: pot + 2 * b }); });
-      html += blk(`Pot odds <small>pot ${money(pot)}</small>`, `<table><tr><th>Bet</th><th>Pot after call</th><th>Need</th><th>You have</th></tr>${rows.map(r => `<tr class="${r.live ? 'live' : ''}"><td><span class="n">${money(r.b)}</span><br><span class="note">${r.label}</span></td><td class="n">${money(r.after)}</td><td class="n">${pct(r.need)}</td><td class="n" style="color:var(--${have === null ? 'muted' : r.need < have ? 'good' : 'bad'})">${have === null ? '…' : pct(have)}</td></tr>`).join('')}</table><p class="note">Need = your call ÷ pot after calling. Call when "you have" beats "need" <span class="term">(pot odds)</span>.${step < 3 ? ' Rough with cards to come.' : ''}</p>`);
+      html += blk(`Pot odds <small>pot ${money(pot)}</small>`, `<table><tr><th>Bet</th><th>Pot after call</th><th>Need</th><th>You have</th></tr>${rows.map(r => `<tr class="${r.live ? 'live' : ''}"><td><span class="n">${money(r.b)}</span><br><span class="note">${r.label}</span></td><td class="n">${money(r.after)}</td><td class="n">${pct(r.need)}</td><td class="n" style="color:var(--${have === null ? 'muted' : r.need < have ? 'good' : 'bad'})">${have === null ? '…' : pct(have)}</td></tr>`).join('')}</table>`, `Need = your call ÷ pot after calling. Call when "you have" beats "need" (pot odds).${step < 3 ? ' Rough with cards to come.' : ''}`);
     }
     $('pane').innerHTML = html;
   }
-  const blk = (title, body) => `<section class="blk"><h3>${title}</h3>${body}</section>`;
+  const blk = (title, body, tip) => `<section class="blk"><h3${tip ? ` title="${esc(tip)}"` : ''}>${title}</h3>${body}</section>`;
   function guessHist() { const g = guesses.slice(-20); return g.length ? `<p class="note">Guess record: off by ${Math.round(g.reduce((s, x) => s + Math.abs(x), 0) / g.length)} on average, last ${g.length}.</p>` : ''; }
   function revealGuess() { const v = parseFloat($('guessIn').value); guessed[step] = isNaN(v) ? null : v; renderPane(); }
   function renderAll() { renderTable(); renderPane(); }
@@ -1682,12 +1741,14 @@
   // Next: reveal the next street; if betting on this street is still open, play it out first (opponents auto, you check/call).
   async function next() {
     const m = hand.m;
-    if (step === 4 || (m.ended && step >= m.ended.street) || (heroOut() && step >= m.foldedAt[0])) { newHand(); return; }
+    if (step === 4 || (m.ended && step >= m.ended.street) || (heroOut() && step >= m.foldedAt[0])) { nextHand(); return; }
     if (isLive()) { await autoPlay({ finishStreet: true }); if (hand.m.ended) { renderAll(); return; } }
     if (step < SC.viewLimit(scenario)) go(step + 1);
   }
 
-  $('dealBtn').addEventListener('click', newHand);
+  $('dealBtn').addEventListener('click', nextHand);
+  $('resetBtn').addEventListener('click', resetTable);
+  $('randBtn').addEventListener('click', randomCards);
   $('nextBtn').addEventListener('click', next);
   $('backBtn').addEventListener('click', () => go(step - 1));
   $('steps').addEventListener('click', e => { const b = e.target.closest('[data-step]'); if (!b) return; if (+b.dataset.step === step + 1 && isLive()) next(); else go(+b.dataset.step); });
@@ -1733,12 +1794,12 @@
   function renderRead(seat) {
     const o = scenario.opponents[seat - 1], s3 = Math.min(step, 3), r = SC.readOf(scenario, seat, s3), m = hand.m;
     const folded = m.foldedAt[seat] !== null && m.foldedAt[seat] <= s3;
-    let html = `<section class="blk"><h3>Your read on ${esc(o.name)} <small>${esc(hand.pos[seat])} · ${STEP[step].toLowerCase()}</small></h3>
-      <p class="note">What you should put them on from what you can see: their seat, the style you gave them, how they've bet, the board and your own cards. Their actual cards are never used.</p>`;
+    let html = `<section class="blk"><h3 title="Built only from what you can see: their seat, the style you gave them, how they've bet, the board and your own cards. Their actual cards are never used.">Your read on ${esc(o.name)} <small>${esc(hand.pos[seat])} · ${STEP[step].toLowerCase()}</small></h3>
+`;
     if (r.kind === 'known') { html += `<p>You set their cards: ${miniCards(o.cards.map(E.cardFromCode))}</p></section>`; return html; }
     // your hand against this read (heads-up)
     let eqTxt = '';
-    if (!folded) {
+    if (!folded && !scenario.heroHidden) {
       const res = job(`rd${seat}:${step}`, 'equity', { hero: hand.hero, board: board(), opps: [SC.engineOpponent(scenario, seat, s3)], trials: 5000 }, { hero: hand.hero, board: board(), opps: [SC.engineOpponent(scenario, seat, s3)], trials: 1500 });
       eqTxt = `<span class="note">your hand wins <b class="n">${res ? pct(res.chance) : '…'}</b> against it</span>`;
     }
@@ -1752,12 +1813,12 @@
         <div class="rcs">${shown.map(comboEl).join('')}${g.combos.length > LIM ? `<button class="more" data-rg="${esc(g.key)}">${open ? 'Fewer' : `+${g.combos.length - LIM} more`}</button>` : ''}</div></div>`;
     }).join('');
     html += blk(`Their likely hands <small>${board().length >= 3 ? 'by what they make on this board' : 'by type'}</small>`, `${groups || '<p class="note">No hands left that fit.</p>'}<div class="rd-legend"><span>Each chip is one exact hand.</span><span><span class="rc"><span>A♠</span></span> likely</span><span><span class="rc mid"><span>A♠</span></span> less likely</span><span><span class="rc lo"><span>A♠</span></span> unlikely</span></div>`);
-    html += `<p class="note">A rule-of-thumb read, not a solver. To use your own read instead, click the player and pick a style or type a range.</p>`;
     return html;
   }
   function setTab(t) { tab = t; document.querySelectorAll('.tabs button').forEach(x => x.setAttribute('aria-selected', x.dataset.tab === t ? 'true' : 'false')); renderPane(); }
   $('pane').addEventListener('click', e => {
     const sp = e.target.closest('[data-speak]'); if (sp) { speakHand(sp); return; }
+    if (e.target.closest('[data-random]')) { randomCards(); return; }
     const tg = e.target.closest('[data-tab-go]'); if (tg) { setTab(tg.dataset.tabGo); return; }
     const rg = e.target.closest('[data-rg]'); if (rg) { readOpen.has(rg.dataset.rg) ? readOpen.delete(rg.dataset.rg) : readOpen.add(rg.dataset.rg); renderPane(); return; }
     const sr = e.target.closest('[data-read]'); if (sr) { showRead(+sr.dataset.read); return; }
@@ -1766,7 +1827,7 @@
     const b = e.target.closest('[data-more]'); if (!b) return; const box = $(b.dataset.more); const open = b.dataset.open === '1'; box.querySelectorAll('.row.hid, .row.was-hid').forEach(r => { r.classList.toggle('hid', open); r.classList.add('was-hid'); }); b.dataset.open = open ? '0' : '1'; b.textContent = open ? `Show ${b.dataset.n} more` : 'Show fewer';
   });
   document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', e => { if (e.target.closest('[data-close-read]')) { closeRead(); return; } setTab(b.dataset.tab); }));
-  document.addEventListener('keydown', e => { if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return; if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); $('nextBtn').click(); } if (e.key === 'ArrowLeft') go(step - 1); if (e.key.toLowerCase() === 'n') newHand(); if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); } });
+  document.addEventListener('keydown', e => { if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return; if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); $('nextBtn').click(); } if (e.key === 'ArrowLeft') go(step - 1); if (e.key.toLowerCase() === 'n') nextHand(); if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); } });
 
   // Server features light up once /api/status answers (nothing changes when the page is opened from disk).
   if (HV) HV.api.init().then(() => {
