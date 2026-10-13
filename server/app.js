@@ -16,7 +16,7 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
 const COMPRESSIBLE = /^(text\/|application\/(json|manifest)|image\/svg)/;
 
 const SECURITY_HEADERS = {
-  'Permissions-Policy': 'microphone=(self), camera=(), geolocation=()',
+  'Permissions-Policy': 'microphone=(self), camera=(self), geolocation=()',
   'Content-Security-Policy': [
     "default-src 'self'", "script-src 'self' 'unsafe-inline'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src https://fonts.gstatic.com", "img-src 'self' data:", "media-src 'self' blob:", "connect-src 'self'",
