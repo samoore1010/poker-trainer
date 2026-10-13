@@ -99,17 +99,20 @@
   .hero .plate { min-width: 112px; }
 
   /* Progression bar */
-  .prog { position: relative; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
-  .steps { flex: 1 1 380px; display: flex; align-items: center; gap: 0; min-width: 0; overflow: hidden; }
-  .steps button { border: 0; background: none; padding: 4px 6px; display: grid; justify-items: center; gap: 4px; font: 600 .68rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); min-width: 64px; }
-  .steps button i { display: block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line); background: var(--panel); }
-  .steps button.done i { background: var(--fg); border-color: var(--fg); }
-  .steps button.on { color: var(--fg); } .steps button.on i { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224,103,79,.3); }
-  .steps .seg { flex: 1; height: 2px; background: var(--line); min-width: 10px; }
-  .steps .seg.done { background: var(--fg); }
-  .ctl { flex: 1 1 auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-  .ctl .hint { font-size: .78rem; color: var(--muted); margin-right: 4px; }
+  /* Bottom panel: the camera on the left, the actions and hand controls on the right (stacked on phones, actions first) */
+  .prog { position: relative; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); align-items: stretch; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+  .camdock { padding: 10px 14px; border-right: 1px solid var(--line); display: grid; align-content: start; gap: 6px; min-width: 0; }
+  .playdock { padding: 10px 14px; display: grid; align-content: center; gap: 10px; min-width: 0; }
+  .cam-off { display: grid; gap: 6px; align-content: center; height: 100%; }
+  .cam-off[hidden], .cam-on[hidden] { display: none; }
+  .cam-start { justify-self: start; font-weight: 600; }
+  .cam-off .note, .dock-info { margin: 0; font-size: .76rem; }
+  .dock-info:empty { display: none; }
+  .ctl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .ctl .hint { font-size: .78rem; color: var(--muted); margin-right: auto; }
   .ctl button.ghost { background: transparent; }
+  .ctl .reset { font-size: .76rem; padding: 5px 9px; color: var(--muted); border-style: dashed; }
+  .ctl .reset.armed { color: #fff; background: var(--bad); border-color: var(--bad); border-style: solid; }
   .ctl button[aria-expanded="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
 
   /* Card picker */
@@ -194,7 +197,7 @@
   .act.empty { visibility: hidden; }
   .card.dim { opacity: .4; }
   /* Action bar, under the table: Fold · Check/Call · Bet/Raise (which opens the sizing: presets, a slider, Confirm) */
-  .actbar { flex: 1 1 100%; display: grid; gap: 8px; width: 100%; max-width: 760px; margin: 0 auto; }
+  .actbar { display: grid; gap: 8px; }
   .actbar[hidden] { display: none; }
   .ab-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; font: 600 .7rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
   .actbar.you .ab-head > span:first-child { color: var(--fg); }
@@ -292,19 +295,24 @@
   .rd-legend { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: .7rem; color: var(--muted); }
 
   /* Camera */
-  .campanel { position: fixed; z-index: 45; left: 16px; bottom: 16px; width: 360px; padding: 9px 10px 10px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 14px 36px rgba(0,0,0,.4); display: grid; gap: 7px; }
-  .campanel[hidden] { display: none; }
-  .cam-head { display: flex; align-items: center; gap: 10px; font: 600 .72rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
-  .cam-head > span { margin-right: auto; display: inline-flex; align-items: center; gap: 6px; }
-  .cam-head label { display: inline-flex; gap: 5px; align-items: center; font: 500 .74rem var(--body); text-transform: none; letter-spacing: 0; color: var(--fg); }
-  .cam-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
-  .cam-dot.on { background: var(--bad); animation: pulse 1.4s ease-in-out infinite; }
+  .cam-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: .78rem; }
+  .cam-head label { display: inline-flex; gap: 5px; align-items: center; }
+  .cam-live { margin-right: auto; display: inline-flex; align-items: center; gap: 6px; font: 700 .72rem var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--bad); }
+  .cam-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
+  .cam-dot.on { background: var(--bad); box-shadow: 0 0 0 0 rgba(224,103,79,.6); animation: live 1.4s ease-in-out infinite; }
+  @keyframes live { 50% { opacity: .35; box-shadow: 0 0 0 5px rgba(224,103,79,0); } }
+  .cam-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 10px; align-items: start; }
   .cam-view { position: relative; background: #000; border-radius: 8px; overflow: hidden; aspect-ratio: 16 / 9; }
   .cam-view video, .cam-view canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  /* hidden view: the video keeps playing (a truly hidden video can be paused by phones, which would stop the reading) */
+  .cam-body.folded { grid-template-columns: minmax(0, 1fr); }
+  .cam-body.folded .cam-view { position: absolute; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
+  .cam-info { display: grid; gap: 4px; min-width: 0; }
+  .cam-btnrow { display: flex; gap: 6px; flex-wrap: wrap; }
+  .cam-btnrow button { padding: 3px 9px; font-size: .74rem; background: transparent; }
   .cam-read { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-size: .8rem; min-height: 22px; }
   .cam-read b { font: 600 .66rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-right: 3px; }
-  .campanel .note { margin: 0; }
-  .cam-reread { padding: 2px 8px; font-size: .74rem; }
+  .camdock .note { margin: 0; }
   .cam-opt { display: inline-flex; gap: 6px; align-items: center; font-size: .78rem; }
   .cam-opt[hidden] { display: none; }
   .cam-ok { color: var(--good); font-weight: 700; }
@@ -314,7 +322,7 @@
   .cam-btns { display: inline-flex; gap: 6px; margin-left: auto; }
   .cam-conflict b { font: 700 .82rem var(--body); letter-spacing: 0; text-transform: none; color: var(--fg); margin: 0; }
   .cam-btns button { padding: 3px 9px; font-size: .74rem; }
-  @media (max-width: 860px) { .campanel { left: 0; right: 0; bottom: 0; width: auto; border-radius: 14px 14px 0 0; padding-bottom: max(10px, env(safe-area-inset-bottom)); } .cam-view { aspect-ratio: auto; height: 22vh; } }
+  @media (max-width: 860px) { .ctl .hint { flex-basis: 100%; order: -2; margin: 0; } .ctl #nextBtn { flex-basis: 100%; order: -1; padding: 10px; } .ctl > button { flex: 1 1 0; white-space: nowrap; } .prog { grid-template-columns: 1fr; } .playdock { order: -1; } .camdock { border-right: 0; border-top: 1px solid var(--line); } .cam-body { grid-template-columns: 132px minmax(0, 1fr); } }
 
   /* Advisor */
   .advisor { background: var(--panel); border-left: 1px solid var(--line); display: grid; grid-template-rows: auto 1fr; min-height: 0; }
@@ -406,7 +414,6 @@
     .card.lg { width: 54px; height: 76px; } .card.lg .r { font-size: 1.2rem; } .card.lg .s { font-size: 1.6rem; } .slot { width: 38px; height: 54px; }
     .board { gap: 4px; }
     .ab { padding: 12px 6px; font-size: 1rem; } .ab.ab-pre { padding: 10px 2px; font-size: .82rem; }
-    .steps button { min-width: 48px; font-size: .6rem; }
   }
 </style>
 <div class="app">
@@ -447,18 +454,32 @@
         </div>
       </div>
       <div class="prog" id="prog">
-        <div class="actbar" id="actbar" hidden role="group" aria-label="Choose an action"></div>
-        <div class="steps" id="steps"></div>
-        <div class="ctl">
-          <span class="hint" id="hint"></span>
-          <button id="backBtn">Back</button>
-          <button class="primary" id="nextBtn">Show the flop</button>
-          <button class="ghost" id="pickBtn" title="Or tap any card on the table">Edit cards</button>
-          <button class="ghost" id="camBtn" title="Point your camera at a table: the cards it sees go on this one">📷 Camera</button>
-          <button class="ghost" id="randBtn" hidden title="Deal yourself two random cards">🎲 Random cards</button>
-          <button id="dealBtn" title="Pays the pot, moves the dealer button one seat on and deals the next hand: same players, stacks carried over">Next hand</button>
-          <button class="ghost" id="resetBtn" title="Start over: new players, fresh stacks, hand 1">Reset table</button>
-        </div>
+        <section class="camdock" id="campanel" aria-label="Camera">
+          <div class="cam-off" id="camOff">
+            <button type="button" class="cam-start" id="camBtn" title="Point your camera at a table: the cards it sees go on this one">📷 Start camera</button>
+            <p class="note">Point a phone or laptop camera at the table: your cards, the board and (with the AI) the betting fill in by themselves.</p>
+            <p class="dock-info" id="dockInfo"></p>
+          </div>
+          <div class="cam-on" id="camOn" hidden>
+            <div class="cam-head"><span class="cam-live"><i class="cam-dot" id="camDot"></i>Live</span><label title="Put the cards the camera reads on this table"><input type="checkbox" id="camAuto" checked> Update the table</label><label class="cam-opt" id="camBetsRow" hidden title="The AI also reads who folded, the chips in front of each player and whose turn it is; the betting is filled in only when it all adds up"><input type="checkbox" id="camBets"> Read the betting</label></div>
+            <div class="cam-body" id="camBody">
+              <div class="cam-view" id="camView"><video id="camVideo" playsinline muted autoplay></video><canvas id="camOverlay"></canvas></div>
+              <div class="cam-info"><div class="cam-read" id="camRead"></div><p class="note" id="camNote">Starting the camera…</p></div>
+            </div>
+            <div class="cam-btnrow"><button type="button" class="ghost" id="camFold" aria-expanded="true">▴ Hide view</button><button type="button" class="ghost" id="camReread" title="Unlock the cards and read the table from scratch">Re-read</button><button type="button" class="ghost" id="camClose">■ Stop</button></div>
+          </div>
+        </section>
+        <section class="playdock">
+          <div class="actbar" id="actbar" hidden role="group" aria-label="Choose an action"></div>
+          <div class="ctl">
+            <span class="hint" id="hint"></span>
+            <button id="backBtn" title="Look at an earlier street">Back</button>
+            <button class="primary" id="nextBtn">Show the flop</button>
+            <button id="dealBtn" title="Pays the pot, moves the dealer button one seat on and deals the next hand: same players, stacks carried over">Next hand</button>
+            <button class="ghost" id="randBtn" hidden title="Deal yourself two random cards">🎲 Random</button>
+            <button class="ghost reset" id="resetBtn" title="Start over: new players, fresh stacks, hand 1">Reset table</button>
+          </div>
+        </section>
       </div>
     </div>
     <aside class="advisor" aria-label="Advisor">
@@ -471,13 +492,6 @@
       <div class="pane" id="pane"></div>
     </aside>
   </div>
-</div>
-<div class="campanel" id="campanel" hidden role="dialog" aria-label="Camera">
-  <div class="cam-head"><span><i class="cam-dot" id="camDot"></i>Camera</span><label title="Put the cards the camera reads on this table"><input type="checkbox" id="camAuto" checked> Update the table</label><button type="button" class="cam-reread" id="camReread" title="Unlock the cards and read the table from scratch">Re-read</button><button type="button" class="cp-x" id="camClose" aria-label="Close camera">×</button></div>
-  <div class="cam-view" id="camView"><video id="camVideo" playsinline muted autoplay></video><canvas id="camOverlay"></canvas></div>
-  <label class="cam-opt" id="camBetsRow" hidden title="The AI also reads who folded, the chips in front of each player and whose turn it is; the betting is filled in only when it all adds up"><input type="checkbox" id="camBets"> Read the betting (beta)</label>
-  <div class="cam-read" id="camRead"></div>
-  <p class="note" id="camNote">Starting the camera…</p>
 </div>
 <div class="cardpick" id="cardpick" hidden role="dialog" aria-label="Choose a card"></div>
 <div class="cardpick seatpop" id="seatpop" hidden role="dialog" aria-label="Edit player"></div>
@@ -775,10 +789,11 @@
     });
     renderBets(over ? null : snap);
     renderActionBar();
-    $('steps').innerHTML = STEP.map((s, i) => `<button data-step="${i}" class="${i === step ? 'on' : i < step ? 'done' : ''}" ${i > SC.viewLimit(scenario) && !(i === step + 1 && !m.ended) ? 'disabled' : ''}><i></i>${s}</button>` + (i < 4 ? `<span class="seg ${i < step ? 'done' : ''}"></span>` : '')).join('');
+    renderDockInfo();
     const ended = (m.ended && step >= m.ended.street) || (heroOut() && step >= m.foldedAt[0]);
     $('nextBtn').textContent = step === 4 || ended ? 'Next hand' : live ? (m.next === 0 ? `Check/call to the ${STEP[step + 1].toLowerCase()}` : `Play to the ${STEP[step + 1].toLowerCase()}`) : NEXT[step];
     $('backBtn').disabled = step === 0;
+    $('dealBtn').hidden = $('nextBtn').textContent === 'Next hand';
     $('hint').textContent = `Hand ${scenario.handNo} · ` + (ended ? (m.ended && m.ended.winner === 0 ? 'Everyone folded. You win.' : m.foldedAt[0] !== null ? 'You folded.' : 'Hand over.') : step === 4 ? 'Hand over.' : live ? `${m.next === 0 ? 'Your' : esc(h.names[m.next - 1]) + "'s"} turn` : nb < 5 ? `${5 - nb} card${nb === 4 ? '' : 's'} to come` : 'All cards out');
   }
 
@@ -1131,7 +1146,6 @@
     const who = e.target.closest('.seat .av, .seat .nm');
     if (who) { closePicker(); const seat = +who.closest('.seat').dataset.seat; showRead(seat); return seatEdit === seat ? closeSeat() : openSeat(seat); }
   });
-  $('pickBtn').addEventListener('click', () => openPicker({ kind: 'hero', i: 0 }));
 
   // ----- camera: read the cards on another table (or another screen running this app) -----
   // 1. Fast first. The on-device reader (vision.js) reads every frame; once a reading holds for 3 frames (about half a
@@ -1294,7 +1308,7 @@
 
   // ----- the camera loop -----
   async function startCamera() {
-    $('campanel').hidden = false; camNote('Starting the camera… allow access if your browser asks.');
+    $('camOff').hidden = true; $('camOn').hidden = false; camNote('Starting the camera… allow access if your browser asks.');
     $('camBetsRow').hidden = !(HV && HV.api.has('vision'));
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camNote(window.isSecureContext ? 'This browser has no camera access.' : 'The camera needs a secure (https) page.', true); return; }
     try {
@@ -1308,13 +1322,12 @@
     $('camDot').classList.add('on');
     Object.assign(cam, { seen: [], four: false, local: null, lock: null, asked: null, prevThumb: null, conflict: null, ignore: '', needCheck: false, betNote: '' });
     camNote('Point it at the table so the cards fill most of the picture. Hold steady.');
-    if (narrow.matches) $('table').scrollIntoView({ block: 'start', behavior: 'smooth' }); // keep this table in view above the camera
     renderCamRead(); camLoop();
   }
   function stopCamera() {
     clearTimeout(cam.timer); cam.timer = 0;
     if (cam.stream) cam.stream.getTracks().forEach(t => t.stop());
-    cam.stream = null; $('camVideo').srcObject = null; $('camDot').classList.remove('on'); $('campanel').hidden = true;
+    cam.stream = null; $('camVideo').srcObject = null; $('camDot').classList.remove('on'); $('camOn').hidden = true; $('camOff').hidden = false;
   }
   function camLoop() {
     if (!cam.stream) return;
@@ -1379,6 +1392,7 @@
   $('camBets').addEventListener('change', () => { store.set('walkthrough.camBets', $('camBets').checked); cam.betNote = ''; cam.asked = null; renderCamRead(); });
   // Boxes over the preview: gold = your cards, green = the board, grey = other cards, dashed = not sure yet.
   function drawCamOverlay(r) {
+    if ($('camBody').classList.contains('folded')) return;
     const cv = $('camOverlay'), box = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
     cv.width = Math.round(box.width * dpr); cv.height = Math.round(box.height * dpr);
     const g = cv.getContext('2d'); g.clearRect(0, 0, cv.width, cv.height);
@@ -1398,6 +1412,10 @@
   }
   $('camBtn').addEventListener('click', () => (cam.stream ? stopCamera() : startCamera()));
   $('camClose').addEventListener('click', stopCamera);
+  // Hide or show the camera's picture; the reading carries on either way.
+  const setCamView = show => { $('camBody').classList.toggle('folded', !show); $('camFold').textContent = show ? '▴ Hide view' : '▾ Show view'; $('camFold').setAttribute('aria-expanded', show ? 'true' : 'false'); store.set('walkthrough.camView', show); };
+  $('camFold').addEventListener('click', () => setCamView($('camBody').classList.contains('folded')));
+  setCamView(store.get('walkthrough.camView') !== false);
   document.addEventListener('visibilitychange', () => { if (!document.hidden && cam.stream && !cam.timer) camLoop(); });
 
   // ----- voice and typed setups: understood on this device, instantly -----
@@ -1677,6 +1695,11 @@
     const warn = S.warnings && S.warnings.length ? `<p class="note err">${esc(S.warnings.join(' '))}</p>` : '';
     return `<div class="adv-hand"><div class="hn"><b>${name}${spk}</b><span class="note">${top}${odds(chance)} · ${vs}${S.exact ? ' · exact' : ''}${g}</span></div><span class="pc" title="Your chance to win">${pct(chance)}</span></div>${warn}`;
   }
+  // Under "Start camera": the hand number and how the last hand went.
+  function renderDockInfo() {
+    const last = lastResult && lastResult.hand === scenario.handNo - 1 ? ` · last hand: ${esc(lastResult.text)}${lastResult.net ? ` (you ${lastResult.net > 0 ? '+' : '−'}${money(Math.abs(lastResult.net))})` : ''}` : '';
+    $('dockInfo').innerHTML = `<b>Hand ${scenario.handNo}</b>${last}`;
+  }
   function waitingBlock() {
     const last = lastResult && lastResult.hand === scenario.handNo - 1 ? `<p class="note">Last hand: ${esc(lastResult.text)}${lastResult.net ? ` (you ${lastResult.net > 0 ? '+' : '−'}${money(Math.abs(lastResult.net))})` : ''}.</p>` : '';
     return `<section class="blk wait"><h3>Hand ${scenario.handNo} · your cards</h3><p>Face down until the camera reads them. Tap them on the table to pick them, or</p><button class="primary" data-random>🎲 Random cards</button>${last}</section>`;
@@ -1747,11 +1770,17 @@
   }
 
   $('dealBtn').addEventListener('click', nextHand);
-  $('resetBtn').addEventListener('click', resetTable);
+  // Reset wipes the table, so it takes a second tap
+  let resetArm = 0;
+  $('resetBtn').addEventListener('click', () => {
+    const b = $('resetBtn');
+    if (b.classList.contains('armed')) { clearTimeout(resetArm); b.classList.remove('armed'); b.textContent = 'Reset table'; resetTable(); return; }
+    b.classList.add('armed'); b.textContent = 'Tap again to reset';
+    resetArm = setTimeout(() => { b.classList.remove('armed'); b.textContent = 'Reset table'; }, 3000);
+  });
   $('randBtn').addEventListener('click', randomCards);
   $('nextBtn').addEventListener('click', next);
   $('backBtn').addEventListener('click', () => go(step - 1));
-  $('steps').addEventListener('click', e => { const b = e.target.closest('[data-step]'); if (!b) return; if (+b.dataset.step === step + 1 && isLive()) next(); else go(+b.dataset.step); });
   $('nOpp').addEventListener('change', () => edit('setup_table', { opponents: +$('nOpp').value }));
   $('guessFirst').addEventListener('change', renderPane);
   const setFour = on => { document.body.classList.toggle('four', on); $('fourColor').checked = on; store.set('walkthrough.fourColor', on); };
