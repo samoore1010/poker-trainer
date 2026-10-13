@@ -155,3 +155,42 @@ test('amounts can be shown in big blinds', () => {
   } finally { S.setUnit('$'); }
   assert.equal(S.fmt(sc, 5), '$5');
 });
+
+// ----- following the betting a camera saw -----
+function sixMax() { const sc = S.create({ opponents: 5 }); S.apply(sc, 'setup_table', { reset: true, opponents: 5, hero_position: 'BB', starting_stack: 200 }); return sc; }
+const seat = (folded, bet, last) => ({ folded, bet, last });
+
+test('camera betting: missing actions are played in turn order up to whose turn it is', () => {
+  const sc = sixMax();
+  const seen = { players: 6, heroPosition: 'BB', toAct: 'BB', unit: 'chips', seats: {
+    UTG: seat(false, 6, 'raise'), HJ: seat(true, 0, 'fold'), CO: seat(false, 6, 'call'), BTN: seat(true, 0, 'fold'), SB: seat(true, 1, 'fold'), BB: seat(false, 2, 'post') } };
+  const r = S.followBetting(sc, seen, 0);
+  assert.ok(r.ok, r.error);
+  assert.equal(r.log.length, 5);
+  const m = S.money(r.sc);
+  assert.equal(m.next, 0); assert.equal(m.street[0].max, 6); assert.equal(m.toCall[0], 4);
+  assert.equal(S.money(sc).street[0].actions.length, 0); // the original is untouched
+  // already up to date: nothing new
+  const again = S.followBetting(r.sc, seen, 0);
+  assert.ok(again.ok); assert.equal(again.log.length, 0);
+});
+
+test('camera betting: a picture that does not add up changes nothing', () => {
+  const sc = sixMax();
+  const base = { UTG: seat(false, 6, 'raise'), HJ: seat(true, 0, 'fold'), CO: seat(false, 6, 'call'), BTN: seat(true, 0, 'fold'), SB: seat(true, 1, 'fold'), BB: seat(false, 2, 'post') };
+  assert.equal(S.followBetting(sc, { players: 6, heroPosition: 'BB', toAct: 'CO', unit: 'chips', seats: base }, 0).ok, false); // wrong turn
+  assert.equal(S.followBetting(sc, { players: 6, heroPosition: 'BB', toAct: 'BB', unit: 'chips', seats: { ...base, CO: seat(false, 6, 'raise') } }, 0).ok, false); // label vs chips
+  assert.equal(S.followBetting(sc, { players: 6, heroPosition: 'BTN', toAct: 'BB', unit: 'chips', seats: base }, 0).ok, false); // a different table
+  assert.equal(S.followBetting(sc, { players: 6, heroPosition: 'BB', toAct: 'BB', unit: 'chips', seats: { ...base, CO: seat(false, 4, 'call') } }, 0).ok, false); // less than the bet
+});
+
+test('camera betting: the flop picture finishes preflop first, amounts in big blinds work', () => {
+  const sc = sixMax();
+  const seen = { players: 6, heroPosition: 'BB', toAct: 'CO', unit: 'bb', seats: {
+    UTG: seat(false, 4, 'bet'), HJ: seat(true, 0, 'none'), CO: seat(false, 0, 'none'), BTN: seat(true, 0, 'none'), SB: seat(true, 0, 'none'), BB: seat(false, 0, 'check') } };
+  const r = S.followBetting(sc, seen, 1);
+  assert.ok(r.ok, r.error);
+  const m = S.money(r.sc);
+  assert.equal(m.frontier, 1); assert.deepEqual(m.liveAfter[0], [0, 1, 3]); // UTG, CO and you saw the flop
+  assert.equal(m.street[1].max, 8); assert.equal(S.positions(r.sc)[m.next], 'CO');
+});
