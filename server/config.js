@@ -30,6 +30,14 @@ function loadConfig() {
       // Reasoning effort for the coach on OpenAI reasoning models (none|low|medium|high); 'off' sends no setting.
       agentReasoning: str('OPENAI_AGENT_REASONING', 'low'),
     },
+    // Camera card reading (the phone asks when it sees the table change). VISION_PROVIDER picks anthropic|openai;
+    // unset = Claude when ANTHROPIC_API_KEY is set, else OpenAI.
+    vision: {
+      provider: str('VISION_PROVIDER').toLowerCase(),
+      anthropicModel: str('VISION_MODEL', 'claude-haiku-5-5'),
+      openaiModel: str('OPENAI_VISION_MODEL'),
+      timeoutMs: int('VISION_TIMEOUT_MS', 20000),
+    },
     // The table agent runs on OpenAI or Claude. AGENT_PROVIDER picks one; unset = Claude when ANTHROPIC_API_KEY is set, else OpenAI.
     agent: {
       provider: str('AGENT_PROVIDER').toLowerCase(),

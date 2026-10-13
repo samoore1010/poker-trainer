@@ -46,7 +46,7 @@ const audio = () => Buffer.alloc(4000, 1);
 test('status reports features and never the key', () => withApp(config(), async url => {
   const r = await fetch(url + '/api/status'); const j = await r.json();
   assert.equal(r.status, 200);
-  assert.deepEqual(j.features, { transcribe: true, parseCards: true, speak: true, agent: true });
+  assert.deepEqual(j.features, { transcribe: true, parseCards: true, speak: true, agent: true, vision: true });
   assert.deepEqual(j.agent, { provider: 'openai', model: 'gpt-6-astra' });
   assert.ok(!JSON.stringify(j).includes('sk-test'));
 }));
@@ -168,4 +168,41 @@ test('normalizeDeal enforces street order and valid codes', () => {
   assert.deepEqual(d.flop, ['Kd', 'Qd']);
   assert.equal(d.turn, null); assert.equal(d.river, null); // no turn without a full flop
   assert.match(d.unclear, /ignored Zz/);
+});
+
+// ----- camera card reading -----
+const { normalize: normalizeVision } = require('../server/vision');
+const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+test('vision: a frame goes to the model with the image and a strict schema', () => withApp(config(), async url => {
+  seen = [];
+  nextReply = { status: 200, body: { output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ board: ['Kh', '7h', '2c'], hero: ['As', 'Ad'], unsure: [] }) }] }] } };
+  const r = await fetch(url + '/api/cards/vision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: PIXEL }) });
+  const j = await r.json();
+  assert.equal(r.status, 200, JSON.stringify(j));
+  assert.deepEqual(j.board, ['Kh', '7h', '2c']); assert.deepEqual(j.hero, ['As', 'Ad']);
+  const sent = JSON.parse(seen.find(x => x.path === '/v1/responses').body.toString());
+  assert.equal(sent.text.format.type, 'json_schema'); assert.equal(sent.text.format.strict, true);
+  const img = sent.input[1].content.find(c => c.type === 'input_image');
+  assert.ok(img.image_url.startsWith('data:image/png;base64,'));
+}));
+
+test('vision: rejects a missing image and answers 503 without any model', async () => {
+  await withApp(config(), async url => {
+    const r = await fetch(url + '/api/cards/vision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: 'hello' }) });
+    assert.equal(r.status, 400);
+  });
+  await withApp(config({ openai: { apiKey: '' } }), async url => {
+    const r = await fetch(url + '/api/cards/vision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: PIXEL }) });
+    assert.equal(r.status, 503); assert.equal((await r.json()).error.code, 'vision_not_configured');
+  });
+});
+
+test('vision: answers are cleaned: no repeats, a board of 0/3/4/5 and a hand of 0/2', () => {
+  assert.deepEqual(normalizeVision({ board: ['Kh', '7h', '2c', '9s'], hero: [], unsure: [] }), { board: ['Kh', '7h', '2c', '9s'], hero: null, unsure: [] });
+  const twice = normalizeVision({ board: ['Kh', '7h', '2c'], hero: ['Kh', 'Ad'], unsure: [] });
+  assert.equal(twice.hero, null); assert.match(twice.unsure.join(), /twice/);
+  assert.equal(normalizeVision({ board: ['Kh', '7h'], hero: ['As', 'Ad'], unsure: [] }).board, null);
+  assert.equal(normalizeVision({ board: [], hero: ['As'], unsure: [] }).hero, null);
+  assert.equal(normalizeVision({ board: ['Zz', '7h', '2c'], hero: [], unsure: [] }).board, null);
 });

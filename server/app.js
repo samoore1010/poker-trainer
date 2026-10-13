@@ -10,6 +10,7 @@ const { createRateLimiter } = require('./rateLimit');
 const { createOpenAI } = require('./openai');
 const routeModules = require('./routes');
 const { createAgent } = require('./agent');
+const { createVision } = require('./vision');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json', '.mp3': 'audio/mpeg', '.woff2': 'font/woff2' };
@@ -39,7 +40,7 @@ function createApp(config, { fetchImpl, log = line => console.log(JSON.stringify
   const openai = createOpenAI(config.openai, { fetchImpl, log });
   const limiter = createRateLimiter({ perMinute: config.rateLimitPerMin });
   const router = createRouter();
-  const ctx = { config, openai, log, agent: createAgent(config, openai) };
+  const ctx = { config, openai, log, agent: createAgent(config, openai), vision: createVision(config, openai) };
   routeModules.forEach(register => register(router, ctx));
   const fileCache = new Map();
 

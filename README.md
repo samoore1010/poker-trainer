@@ -78,12 +78,13 @@ Chips slide in front of each player as they bet and sweep into the pot when the 
 
 ## Camera (experimental)
 
-📷 **Camera** reads the cards on another table through your phone's camera and puts them on this one, as if you'd tapped them in. For now it's built for this app's own cards: point the phone at another screen running the app.
+📷 **Camera** follows the cards on another table through your phone's camera and puts them on this one, as if you'd tapped them in. Today it's tested by pointing a phone at another screen running this app.
 
-- **What it reads:** the row of 3–5 cards in the middle of the table is the board (left to right = flop, turn, river); the larger pair below it is your hand. When the board goes away, or both of your cards change, it starts a new hand.
-- **How:** entirely in the browser, nothing uploaded and no model to download (`public/vision.js`). It finds the white card faces, straightens them (tilt is fine), reads the rank in the top-left corner and the suit in the bottom-right against templates drawn with the same fonts, and only changes the table once the same reading has held for three frames (about half a second). Each change lands roughly a second after the other screen changes.
-- **Preview:** gold boxes are your cards, green the board; dashed boxes and a "?" mean it isn't sure yet and won't change anything.
-- **Best results:** turn on **4-color deck** (top bar) on the screen being filmed: diamonds turn blue and clubs green, so suits are read by colour, which survives blur and dim light. With the usual two colours, ♠ and ♣ are told apart by shape and can be confused when the picture is dim, washed out or far away. Fill most of the picture with the table and hold steady.
+- **Locked in.** Within a hand your two cards never change and the board only grows (flop, then turn, then river), so a confirmed card stays put (🔒 in the camera panel). A hand passing over the table, glare or one bad frame can't swap it. When the camera disagrees with a locked card it asks instead of changing anything: **Use the camera's** or **Keep**. A new hand (the board cleared, or two new cards) unlocks everything; **Re-read** does it by hand. Cards you pick yourself count as confirmed.
+- **Hybrid reading.** On the phone, `public/vision.js` reads cards in every frame and a small thumbnail notices when the picture changes and settles. When it does, one frame goes to a vision model (`POST /api/cards/vision`: Claude when `ANTHROPIC_API_KEY` is set, `claude-haiku-5-5` unless `VISION_MODEL` says otherwise; else OpenAI). If the model and the phone agree, it applies; if they disagree, it asks the model once more and goes with the majority. Because the model is only asked when something changes, a hand costs about 5–10 checks (the panel counts them). The model reads any deck or table style; the phone's own reader only knows this app's cards and is a second opinion.
+- **No vision model** (no keys, or it's failing): the phone's reading alone is used, with the same locking.
+- **Preview:** gold boxes are your cards, green the board; dashed boxes and a "?" mean the phone isn't sure.
+- **Best results:** fill most of the picture with the table and hold steady. With the phone's reader, the **4-color deck** setting (top bar) on the filmed screen makes suits much more reliable.
 - **Needs** a secure (https) page, which Railway provides, and camera permission.
 
 ## Voice
@@ -138,6 +139,7 @@ test/                node:test suites
 | `POST /api/agent` | `{message, scenario, history?}` | `{reply, scenario, changes, stats, provider, model}`; with `Accept: application/x-ndjson`, a stream of `status` / `scenario` events then `done` |
 | `POST /api/transcribe?context=cards\|none` | raw audio (`audio/webm`, mp4, ogg, wav, mp3) | `{text}` |
 | `POST /api/cards/parse` | `{text}` | `{hero, flop, turn, river, unclear}` |
+| `POST /api/cards/vision` | `{image: "data:image/jpeg;base64,…", player?}` | `{board, hero, unsure, provider, model}` (`board` null = unreadable, `hero` null = not seen) |
 | `POST /api/speak` | `{text, voice?}` | `audio/mpeg` |
 
 Errors are `{"error": {"code", "message"}}`. With `ACCESS_CODE` set, send it as `X-Access-Code`.

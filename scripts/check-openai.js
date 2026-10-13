@@ -5,7 +5,8 @@
 const { loadConfig } = require('../server/config');
 
 (async () => {
-  const { openai, agent } = loadConfig();
+  const { openai, agent, vision } = loadConfig();
+  const visionOnClaude = agent.anthropicKey && vision.provider !== 'openai';
   let failed = false;
   const ok = msg => console.log('✓ ' + msg), bad = msg => { failed = true; console.error('✗ ' + msg); };
 
@@ -16,6 +17,7 @@ const { loadConfig } = require('../server/config');
     if (openai.project) headers['OpenAI-Project'] = openai.project;
     const models = [['transcription', openai.transcribeModel], ['card parsing', openai.textModel], ['text-to-speech', openai.ttsModel]];
     if (!agent.anthropicKey || agent.provider === 'openai') models.push(['table agent', openai.agentModel]);
+    if (!visionOnClaude) models.push(['camera card reading', vision.openaiModel || openai.agentModel]);
     for (const [role, id] of models) {
       try {
         const res = await fetch(`${openai.baseUrl}/models/${encodeURIComponent(id)}`, { headers, signal: AbortSignal.timeout(15000) });
@@ -24,14 +26,19 @@ const { loadConfig } = require('../server/config');
     }
   }
 
-  if (agent.anthropicKey && agent.provider !== 'openai') {
+  if (agent.anthropicKey) {
     const Anthropic = require('@anthropic-ai/sdk').default;
     const client = new Anthropic({ apiKey: agent.anthropicKey, ...(agent.anthropicBaseUrl ? { baseURL: agent.anthropicBaseUrl } : {}) });
-    try { const m = await client.models.retrieve(agent.anthropicModel); ok(`table agent (Claude): ${m.id}`); }
-    catch (e) {
-      if (e instanceof Anthropic.AuthenticationError) bad('ANTHROPIC_API_KEY was rejected.');
-      else if (e instanceof Anthropic.NotFoundError) bad(`Claude model ${agent.anthropicModel} not found.`);
-      else bad(`Claude check failed: ${e.message}`);
+    const checks = [];
+    if (agent.provider !== 'openai') checks.push(['table agent (Claude)', agent.anthropicModel]);
+    if (visionOnClaude) checks.push(['camera card reading (Claude)', vision.anthropicModel]);
+    for (const [role, id] of checks) {
+      try { const m = await client.models.retrieve(id); ok(`${role}: ${m.id}`); }
+      catch (e) {
+        if (e instanceof Anthropic.AuthenticationError) { bad('ANTHROPIC_API_KEY was rejected.'); break; }
+        else if (e instanceof Anthropic.NotFoundError) bad(`${role}: model ${id} not found.`);
+        else bad(`${role}: check failed: ${e.message}`);
+      }
     }
   }
   if (!openai.apiKey && !agent.anthropicKey) bad('No API keys set: add OPENAI_API_KEY (voice + coach) and/or ANTHROPIC_API_KEY (coach).');

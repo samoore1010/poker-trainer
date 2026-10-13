@@ -20,6 +20,7 @@ before(async () => {
       }
       if (req.url.startsWith('/v1/messages')) {
         const last = body.messages[body.messages.length - 1], base = { id: 'm', type: 'message', role: 'assistant', model: body.model, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } };
+        if (body.output_config && body.output_config.format) return res.end(JSON.stringify({ ...base, stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ board: ['Qc', '7h', '2d', '9s'], hero: ['As', 'Kd'], unsure: [] }) }] })); // camera reading
         if (typeof last.content === 'string') return res.end(JSON.stringify({ ...base, stop_reason: 'tool_use', content: PLAN.map(([name, input], i) => ({ type: 'tool_use', id: 't' + i, name, input })) }));
         const calc = last.content.map(b => JSON.parse(typeof b.content === 'string' ? b.content : b.content[0].text)).find(o => winOf(o) !== undefined).stats;
         return res.end(JSON.stringify({ ...base, stop_reason: 'end_turn', content: [{ type: 'text', text: `win ${calc.win_pct}` }] }));
@@ -90,5 +91,25 @@ test('streams progress, the new table, then the answer', async () => {
     assert.ok(types.indexOf('scenario') < types.indexOf('done'));
     assert.deepEqual(events.find(e => e.type === 'scenario').scenario.hero.cards, ['Ah', 'Qh']);
     check(events.at(-1));
+  } finally { srv.close(); }
+});
+
+test('camera reading on Claude: image in, structured cards out, Haiku by default', async () => {
+  seen = [];
+  const config = { ...cfg({ anthropicKey: 'sk-ant-test', anthropicBaseUrl: url }), vision: { anthropicModel: 'claude-haiku-5-5' } };
+  const srv = http.createServer(createApp(config, { log: () => {} }));
+  await new Promise(r => srv.listen(0, '127.0.0.1', r));
+  try {
+    const status = await (await fetch(`http://127.0.0.1:${srv.address().port}/api/status`)).json();
+    assert.deepEqual(status.vision, { provider: 'anthropic', model: 'claude-haiku-5-5' });
+    const image = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==';
+    const r = await fetch(`http://127.0.0.1:${srv.address().port}/api/cards/vision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image }) });
+    const j = await r.json();
+    assert.equal(r.status, 200, JSON.stringify(j));
+    assert.deepEqual(j.board, ['Qc', '7h', '2d', '9s']); assert.deepEqual(j.hero, ['As', 'Kd']); assert.equal(j.provider, 'anthropic');
+    const sent = seen.find(s => s.url.startsWith('/v1/messages')).body;
+    assert.equal(sent.model, 'claude-haiku-5-5');
+    assert.equal(sent.output_config.format.type, 'json_schema');
+    assert.deepEqual(sent.messages[0].content[0].source, { type: 'base64', media_type: 'image/jpeg', data: '/9j/4AAQSkZJRgABAQ==' });
   } finally { srv.close(); }
 });
