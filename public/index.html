@@ -326,6 +326,7 @@
   .cam-full .cam-rot { right: 20px; bottom: 20px; width: 48px; height: 48px; font-size: 1.5rem; }
   .cam-live-row { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .76rem; }
   .cam-live-row .ok { color: var(--good); } .cam-live-row .no { color: var(--warn); }
+  .cam-ai .lag { font-family: var(--mono); color: var(--fg); }
   .cam-info { display: grid; gap: 4px; min-width: 0; }
   .cam-btnrow { display: flex; gap: 6px; flex-wrap: wrap; }
   .cam-btnrow .cam-syncbtn { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: var(--accent); font-weight: 600; }
@@ -1363,57 +1364,125 @@
   }
 
   // ----- following the table live -----
-  // With "Follow the table live" on, the AI reads the whole table about every second (the fast model; up to three
-  // readings in flight, so a new one lands while the next is on its way): every seat's chips in front, folds, whose turn
-  // it is, the pot, names, stacks and the cards. Each reading is applied as it lands, newest wins:
-  //   betting: the missing actions are played in turn order (PokerScenario.trackTable), folds the table had filled in
-  //     as calls are corrected; a reading that contradicts the table is skipped and says why
-  //   seats: names, stacks, the dealer and the number of players follow once two readings in a row agree (the dealer
-  //     and players only between hands; stacks only while the betting matches)
+  // With "Follow the table live" on, the AI reads the table continuously, up to three readings in flight so a fresh one
+  // lands every fraction of a second. Two kinds of reading:
+  //   short (most of them): bets, folds, whose turn, pot and cards as short arrays, from a picture cropped to the table
+  //     and scaled down: a short answer is a fast answer
+  //   full (every 10 s, at the start of each hand, and whenever the seats stop matching): names, stacks, the dealer, the
+  //     blinds and where the table is in the picture (for the crop)
+  // Each reading is applied as it lands, newest wins:
+  //   betting: the missing actions are played in turn order (PokerScenario.trackTable), one at a time so the chips and
+  //     the turn move as they would at the table; folds the table had filled in as calls are corrected. When two
+  //     readings in a row disagree with the table, the camera wins: the street is rebuilt from the picture
+  //     (PokerScenario.rebuildFrom)
+  //   seats (full readings): names follow once two readings agree; stacks while the betting matches; the dealer and
+  //     the number of players between hands
   //   cards: as with the AI check (a change to cards already on the table needs two readings in a row)
   const liveOn = () => aiReady() && $('camBets').checked;
-  function pumpLive(pic) {
+  const FULL_EVERY = 10000;
+  function pumpLive() {
     const L = cam.live, now = Date.now();
-    if (L.inflight >= 3 || now - L.lastSent < 450) return;
-    if ((pic.changed && pic.settled) || now - L.lastSent > 2000) askLive();
+    if (cam.still < 1) return; // mid-motion frames (chips flying) read badly
+    const fresh = scenario.streets.every(st => st.actions.every(a => a.filled || a.auto));
+    const wantFull = !L.fullBusy && (!L.fullAt || now - L.fullAt > FULL_EVERY || (fresh && L.fullHand !== hand.deal) || L.seatMiss >= 2);
+    if (wantFull && L.inflight < 3) return askLive('full');
+    if (L.inflight >= 3 || now - L.lastSent < Math.max(300, (L.ms || 900) / 3)) return;
+    askLive(L.fullAt ? 'short' : 'full');
   }
-  async function askLive() {
+  // the picture for a reading: short reads are cropped to the table (learned from the last full read) and scaled down
+  function liveImage(kind) {
+    const src = cam.canvas, box = kind === 'short' && cam.live.box;
+    let sx = 0, sy = 0, sw = src.width, sh = src.height;
+    if (box) { const m = 0.04; sx = Math.max(0, (box[0] - m) * src.width); sy = Math.max(0, (box[1] - m) * src.height); sw = Math.min(src.width, (box[2] + m) * src.width) - sx; sh = Math.min(src.height, (box[3] + m) * src.height) - sy; }
+    const max = kind === 'short' ? 960 : 1280, k = Math.min(1, max / Math.max(sw, sh));
+    const c = cam.liveCanvas || (cam.liveCanvas = document.createElement('canvas'));
+    c.width = Math.round(sw * k); c.height = Math.round(sh * k);
+    c.getContext('2d').drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', kind === 'short' ? 0.75 : 0.85);
+  }
+  async function askLive(kind) {
     const L = cam.live, seq = ++L.seq, t0 = Date.now();
     L.inflight++; L.lastSent = t0; cam.asked = cam.thumbNow; cam.needCheck = false;
+    if (kind === 'full') L.fullBusy = true;
     try {
-      const T = await HV.api.request('/api/cards/table', { body: JSON.stringify({ image: frameJpeg(0.8), fast: true }), headers: { 'Content-Type': 'application/json' } });
+      const body = kind === 'full' ? { image: liveImage('full'), fast: true } : { image: liveImage('short'), live: true, seats: scenario.opponents.length + 1 };
+      const T = await HV.api.request('/api/cards/table', { body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
       cam.ai.calls++; cam.ai.fails = 0;
-      L.ms = L.ms ? L.ms * 0.7 + (Date.now() - t0) * 0.3 : Date.now() - t0;
-      if (seq < L.applied || !cam.stream) return; // a newer reading has already been applied
+      const ms = Date.now() - t0;
+      if (kind === 'short') L.ms = L.ms ? L.ms * 0.7 + ms * 0.3 : ms; else L.fullMs = L.fullMs ? L.fullMs * 0.7 + ms * 0.3 : ms;
+      if (!cam.stream) return;
+      if (kind === 'full') { L.fullAt = Date.now(); L.fullHand = hand.deal; if (T.box) L.box = T.box; if (T.readable.seats) followSeats(T, L.inSync); L.seatMiss = 0; }
+      if (seq < L.applied) return; // a newer reading has already been applied: its betting and cards are fresher
       L.applied = seq; L.at = Date.now(); L.reads++;
-      applyLive(T);
-    } catch (e) { aiFailed(e); } finally { L.inflight--; renderCamRead(); }
+      applyLive(T, t0);
+    } catch (e) { aiFailed(e); } finally { L.inflight--; if (kind === 'full') L.fullBusy = false; renderCamRead(); }
   }
-  function applyLive(T) {
+  // While actions are being played onto the table one by one, newer readings wait for it (the latest one only).
+  function applyLive(T, capturedAt) {
+    if (cam.anim) { cam.pendingLive = [T, capturedAt]; return; }
     noteRotation(T.rotate);
-    cam.sync = T;
+    if (T.live && T.seats.length && T.seats.length !== scenario.opponents.length + 1) cam.live.seatMiss++; // the seats no longer match: a full read will sort it out
+    cam.sync = T.live && cam.sync ? { ...cam.sync, ...T, readable: { ...cam.sync.readable, cards: T.readable.cards, betting: T.readable.betting }, seats: cam.sync.seats.length === T.seats.length ? cam.sync.seats.map((x, i) => ({ ...x, ...T.seats[i], name: x.name, stack: x.stack, dealer: x.dealer })) : T.seats } : T;
     const street = T.readable.cards && T.board ? BOARD_N.indexOf(T.board.length) : Math.max(0, BOARD_N.indexOf(scenario.board.length));
-    const inSync = liveBetting(T, street);
-    if (T.readable.seats) followSeats(T, inSync);
-    if (T.readable.cards && (T.hero || (T.board && T.board.length))) {
-      const A = { hero: T.hero, board: T.board }, p = planFor(A, true), k = readKey(A);
-      if ((p.fixes.length || p.newHand) && cam.live.fixKey !== k) cam.live.fixKey = k; // wait for the next reading to agree
-      else { cam.live.fixKey = ''; decide(A, 'ai'); }
-    }
+    const after = () => {
+      if (T.readable.cards && (T.hero || (T.board && T.board.length))) {
+        const A = { hero: T.hero, board: T.board }, p = planFor(A, true), k = readKey(A);
+        if ((p.fixes.length || p.newHand) && cam.live.fixKey !== k) cam.live.fixKey = k; // wait for the next reading to agree
+        else { cam.live.fixKey = ''; decide(A, 'ai'); }
+      }
+      noteLag(capturedAt);
+    };
+    liveBetting(T, street, after);
   }
-  // → true when the table's betting matches the picture
-  function liveBetting(T, street) {
-    if (!T.readable.betting) { cam.betNote = 'Betting: not readable in this picture.'; return false; }
-    if (T.seats.length !== scenario.opponents.length + 1) { cam.betNote = `Betting: waiting for the table to match the camera (${T.seats.length} players on camera).`; return false; }
-    const res = SC.trackTable(scenario, T, street);
-    if (!res.ok) { cam.betNote = `Betting not followed: ${res.error}.`; cam.betBad = (cam.betBad || 0) + 1; return false; }
-    cam.betBad = 0;
-    if (!res.log.length) { if (!cam.betAt || /not /.test(cam.betNote)) cam.betNote = 'Betting: up to date.'; return !res.partial; }
-    const had = scenario.streets.map(st => st.actions.length);
-    autoRun++; pushUndo(); loadScenario(res.sc); syncLock();
-    flashSeats(scenario.streets.flatMap((st, k) => st.actions.slice(had[k]).map(a => a.seat)));
-    cam.betNote = `Betting: ${res.log.join(' · ')}.`; cam.betAt = Date.now();
-    return !res.partial;
+  // Lag: from the moment the picture changed to the moment the table showed it.
+  function noteLag(capturedAt) {
+    const L = cam.live;
+    if (!L.changeAt || capturedAt < L.changeAt) return;
+    if (L.changedTable) { const lag = Date.now() - L.changeAt; L.lag = lag; L.lagAvg = L.lagAvg ? L.lagAvg * 0.7 + lag * 0.3 : lag; }
+    L.changeAt = 0; L.changedTable = false;
+  }
+  // Plays the reading's betting onto the table; then(): the cards and the lag, once the actions are on.
+  function liveBetting(T, street, then) {
+    const L = cam.live, done = () => { then && then(); };
+    if (!T.readable.betting) { cam.betNote = 'Betting: not readable in this picture.'; L.inSync = false; return done(); }
+    if (T.seats.length !== scenario.opponents.length + 1) { cam.betNote = `Betting: waiting for the table to match the camera (${T.seats.length} players on camera).`; L.inSync = false; return done(); }
+    let res = SC.trackTable(scenario, T, street), rebuilt = '';
+    if (!res.ok) {
+      L.bad = (L.bad || 0) + 1;
+      if (L.bad < 2) { cam.betNote = `Betting: ${res.error}; checking again.`; L.inSync = false; return done(); }
+      const rb = SC.rebuildFrom(scenario, T, street);
+      if (!rb.ok) { cam.betNote = `Betting not followed: ${res.error}.`; L.inSync = false; return done(); }
+      res = rb; rebuilt = rb.scope === 'hand' ? 'the hand' : `the ${STEP[street].toLowerCase()}`;
+    }
+    L.bad = 0;
+    L.inSync = !res.partial;
+    if (!res.log.length && !rebuilt) { if (!cam.betAt || /not |checking/.test(cam.betNote)) cam.betNote = 'Betting: up to date.'; return done(); }
+    L.changedTable = true;
+    cam.betNote = rebuilt ? `Camera wins: rebuilt ${rebuilt} from the picture (${res.log.join(' · ') || 'no actions yet'}).` : `Betting: ${res.log.join(' · ')}.`;
+    cam.betAt = Date.now();
+    autoRun++; pushUndo();
+    if (rebuilt || res.repaired) { loadScenario(res.sc); syncLock(); flashSeats([0].concat(scenario.opponents.map((_, i) => i + 1))); return done(); }
+    animateTo(res.sc, done);
+  }
+  // One action at a time, about a quarter of a second apart: the chips slide in, the bubble changes and the turn moves on.
+  function animateTo(target, then) {
+    const start = scenario.streets.map(st => st.actions.length), steps = [];
+    target.streets.forEach((st, k) => st.actions.slice(start[k]).forEach(a => steps.push([k, a])));
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (steps.length <= 1 || reduce) { loadScenario(target); syncLock(); flashSeats(steps.map(x => x[1].seat)); return then(); }
+    const run = ++autoRun; cam.anim = true;
+    const base = SC.clone(scenario);
+    let i = 0;
+    const tick = () => {
+      if (run !== autoRun || !cam.stream) { cam.anim = false; loadScenario(target); syncLock(); return then(); } // interrupted: jump to the end
+      const [k, a] = steps[i++];
+      base.streets[k].actions.push(a); if (k > base.street) base.street = k;
+      loadScenario(SC.clone(base)); syncLock(); flashSeats([a.seat]);
+      if (i < steps.length) { setTimeout(tick, 260); return; }
+      loadScenario(target); syncLock(); cam.anim = false; then();
+      if (cam.pendingLive) { const [T, at] = cam.pendingLive; cam.pendingLive = null; applyLive(T, at); }
+    };
+    tick();
   }
   function followSeats(T, bettingInSync) {
     const plan = SC.syncPlan(scenario, T);
@@ -1527,7 +1596,8 @@
     const v = $('camVideo'); v.srcObject = cam.stream; try { await v.play(); } catch (e) {}
     $('camDot').classList.add('on');
     Object.assign(cam, { seen: [], four: false, local: null, lock: null, asked: null, prevThumb: null, conflict: null, ignore: '', needCheck: false, betNote: '', betAt: 0, seatNote: '', sync: null, synced: false, plan: null, quality: null, rotVotes: [],
-      live: { seq: 0, applied: 0, inflight: 0, lastSent: 0, at: 0, reads: 0, ms: 0, planKey: '', fixKey: '' } });
+      anim: false, pendingLive: null,
+      live: { seq: 0, applied: 0, inflight: 0, lastSent: 0, at: 0, reads: 0, ms: 0, fullMs: 0, fullAt: 0, fullHand: null, fullBusy: false, box: null, seatMiss: 0, inSync: false, bad: 0, changeAt: 0, changedTable: false, lag: 0, lagAvg: 0, planKey: '', fixKey: '' } });
     camNote('Point it at the table so the cards fill most of the picture. Hold steady.');
     renderCamRead(); camLoop();
   }
@@ -1575,7 +1645,7 @@
     } else if (!usable && !cam.ai.busy) camNote(aiReady() ? 'Reading with the AI…' : r.cards.length ? 'Some cards aren\'t clear yet: move a little closer or hold steadier.' : 'Point it at the table so the cards fill most of the picture.', false, true);
     // the AI looks when the fast reading put something new on the table, or the picture changed in a way the fast
     // reading can't vouch for (it can't read these cards, or the betting is being followed)
-    if (liveOn()) pumpLive(pic);
+    if (liveOn()) { if (pic.changed && !cam.live.changeAt) cam.live.changeAt = Date.now(); pumpLive(); }
     else if (aiReady() && !cam.ai.busy && Date.now() - cam.ai.last > 1200 && pic.settled && (cam.needCheck || (pic.changed && (!steady || unverified())))) askAI();
     renderCamRead();
   }
@@ -1588,7 +1658,8 @@
     const L = cam.live || {};
     if (liveOn()) {
       const ago = L.at ? `${((Date.now() - L.at) / 1000).toFixed(1)} s ago` : 'starting…';
-      html += `<span class="note cam-ai" title="How fresh the table is: when the last reading landed, and how long a reading takes">Live · read ${ago} · ${L.ms ? (L.ms / 1000).toFixed(1) + ' s per read' : '…'} · ${cam.ai.calls} reads${L.inflight ? ` · ${L.inflight} on the way` : ''}</span>`;
+      const sec = x => (x / 1000).toFixed(1) + ' s';
+      html += `<span class="note cam-ai" title="Lag: from the moment the picture changed to the moment this table showed it (last, and the running average). A read: how long one short reading takes; the full reading (names, stacks, dealer) runs every 10 s.">Live · <b class="lag">lag ${L.lag ? `${sec(L.lag)} (avg ${sec(L.lagAvg)})` : '–'}</b> · read ${L.ms ? sec(L.ms) : '…'}${L.fullMs ? ` · full ${sec(L.fullMs)}` : ''} · last ${ago} · ${cam.ai.calls} reads${L.inflight ? ` · ${L.inflight} on the way` : ''}${L.box ? ' · cropped' : ''}</span>`;
       const T = cam.sync, k = T && T.unit === 'bb' ? scenario.bigBlind : 1, potT = hand.m.potShow[Math.min(hand.m.frontier, 3)];
       const row = [];
       if (T && T.pot) row.push(Math.abs(T.pot * k - potT) < 0.01 * Math.max(1, scenario.bigBlind) + 1e-9 ? `<span class="ok">Pot ${money(potT)} ✓</span>` : `<span class="no" title="The pot the camera sees doesn't match this table's: some betting may be missing">Pot: camera ${money(T.pot * k)} · table ${money(potT)}</span>`);
@@ -1643,7 +1714,7 @@
   }
   // Which way up: turned automatically when the AI sees it sideways, or by hand with ↻. Remembered on this device.
   cam.rot = [0, 90, 180, 270].includes(store.get('walkthrough.camRot')) ? store.get('walkthrough.camRot') : 0;
-  function setRot(r) { cam.rot = r; store.set('walkthrough.camRot', r); cam.prevThumb = null; cam.asked = null; cam.seen = []; cam.localKey = ''; }
+  function setRot(r) { cam.rot = r; store.set('walkthrough.camRot', r); cam.prevThumb = null; cam.asked = null; cam.seen = []; cam.localKey = ''; if (cam.live) { cam.live.box = null; cam.live.fullAt = 0; } }
   const turn = e => { e.stopPropagation(); setRot((cam.rot + 90) % 360); camNote(`Turned the picture a quarter turn.`); };
   $('camRot').addEventListener('click', turn);
   $('camFullRot').addEventListener('click', turn);

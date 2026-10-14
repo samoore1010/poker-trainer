@@ -231,3 +231,12 @@ test('vision: whole-table reading is strict about what it could read', () => {
   assert.equal(bad.readable.betting, false); assert.equal(bad.readable.names, false); assert.equal(bad.readable.stacks, false);
   assert.ok(bad.problems.length >= 1); assert.equal(bad.blinds, null);
 });
+
+test('vision: the short live reading becomes the same seats shape, and is strict', () => {
+  const { normalizeLive } = require('../server/vision');
+  const r = normalizeLive({ rotate: 0, ok: true, cards_ok: true, bets: [2, 5, 0, 5], folded: [false, false, true, false], to_act: 0, pot: 13, board: [], hero: ['As', 'Kd'] });
+  assert.equal(r.live, true); assert.equal(r.seats.length, 4); assert.equal(r.seats[1].bet, 5); assert.equal(r.seats[2].folded, true);
+  assert.equal(r.toAct, 0); assert.equal(r.pot, 13); assert.deepEqual(r.hero, ['As', 'Kd']); assert.equal(r.readable.betting, true);
+  assert.equal(normalizeLive({ ok: true, cards_ok: true, bets: [2, 5], folded: [false], to_act: 0, pot: 0, board: [], hero: [] }).readable.betting, false); // lengths differ
+  assert.equal(normalizeLive({ ok: false, cards_ok: false, bets: [2, 5], folded: [false, false], to_act: 9, pot: 0, board: ['Ah'], hero: [] }).toAct, null);
+});
