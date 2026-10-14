@@ -3,10 +3,10 @@
 // Shared by the browser (window.PokerScenario) and the server (require). Cards are codes like "Ah", "Tc".
 (function (root, factory) {
   const node = typeof module === 'object' && module.exports;
-  const api = factory(node ? require('./engine.js') : root.PokerEngine, node ? require('./strategy.js') : root.PokerStrategy, node ? require('./ranges.js') : root.PokerRanges);
+  const api = factory(node ? require('./engine.js') : root.PokerEngine, node ? require('./strategy.js') : root.PokerStrategy, node ? require('./ranges.js') : root.PokerRanges, node ? require('./ev.js') : root.PokerEV);
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.PokerScenario = api;
-})(typeof self !== 'undefined' ? self : this, function (E, PS, RG) {
+})(typeof self !== 'undefined' ? self : this, function (E, PS, RG, EV) {
   'use strict';
 
   const STREETS = ['preflop', 'flop', 'turn', 'river', 'showdown'];
@@ -96,13 +96,14 @@
         name: (typeof o.name === 'string' && o.name.trim() ? o.name.trim() : NAMES[i % NAMES.length]).slice(0, 24),
         stack: Math.max(0, num(o.stack, 200)), cards: cards.length === 2 ? cards : null, range,
         style: typeof o.style === 'string' ? o.style.slice(0, 40).trim().toLowerCase() : '', note: typeof o.note === 'string' ? o.note.slice(0, 200) : '',
+        ...(o.styleBy === 'stats' || o.styleBy === 'you' ? { styleBy: o.styleBy } : {}),
       });
     });
     const streets = Array.isArray(src.streets) ? src.streets : [];
     const TYPES = ['fold', 'check', 'call', 'bet', 'raise'];
     sc.streets = [0, 1, 2, 3].map(s => {
       const st = streets[s] && typeof streets[s] === 'object' ? streets[s] : {};
-      const actions = (Array.isArray(st.actions) ? st.actions : []).filter(a => a && TYPES.includes(a.type)).map(a => ({ seat: Math.round(num(a.seat, -1)), type: a.type, to: Math.max(0, num(a.to, 0)) })).filter(a => a.seat >= 0 && a.seat <= n);
+      const actions = (Array.isArray(st.actions) ? st.actions : []).filter(a => a && TYPES.includes(a.type)).map(a => ({ seat: Math.round(num(a.seat, -1)), type: a.type, to: Math.max(0, num(a.to, 0)), ...(a.auto ? { auto: true } : {}) })).filter(a => a.seat >= 0 && a.seat <= n);
       const plan = st.plan && Array.isArray(st.plan.folds) ? { folds: st.plan.folds.map(x => Math.round(num(x, -1))).filter(x => x >= 1 && x <= n) } : undefined;
       return plan ? { actions, plan } : { actions };
     });
@@ -234,11 +235,12 @@
         if (!snap.actions.some(a => a.seat === seat)) continue;
         if (sc.board.length < BOARD_N[k]) { steps.push({ text: `The ${STREETS[k]} cards aren't set, so their ${STREETS[k]} action can't be read.`, n: null }); continue; }
         const bd = sc.board.slice(0, BOARD_N[k]).map(E.cardFromCode), cls = new Map();
-        const contrib = new Array(sc.opponents.length + 1).fill(0); let max = 0, firstIn = true;
+        const contrib = new Array(sc.opponents.length + 1).fill(0), gone = new Set(); let max = 0, firstIn = true, called = 0;
         for (const a of snap.actions) {
           const owe = max - contrib[a.seat], potBefore = snap.start + contrib.reduce((x, y) => x + y, 0);
           if (a.seat === seat && a.type !== 'fold') {
-            const facing = owe > 0, sit = { facing, price: facing ? owe / (potBefore + owe) : 0, river: k === 3, cbet: k === 1 && pfr === seat && firstIn, mods };
+            const others = Math.max(0, m.live[k].filter(x => !gone.has(x)).length - 2);
+            const facing = owe > 0, sit = { facing, price: facing ? owe / (potBefore + owe) : 0, river: k === 3, cbet: k === 1 && pfr === seat && firstIn, mods, others, callers: facing ? called : 0 };
             const bet = a.to - contrib[a.seat], frac = bet / Math.max(potBefore, 1e-9);
             const act = facing ? (a.type === 'call' ? 'call' : 'raise') : a.type === 'check' ? 'check' : frac > 0.6 ? 'big' : 'small';
             w.forEach((x, key) => {
@@ -253,9 +255,9 @@
             const what = act === 'check' ? 'Checked' : act === 'call' ? `Called ${fmt(sc, owe)}` : act === 'raise' ? `Raised to ${fmt(sc, a.to)}` : `Bet ${fmt(sc, bet)} (${Math.round(frac * 100)}% of the pot)`;
             steps.push({ text: `${what} on the ${STREETS[k]}: ${RG.SAYS[act]}.`, n: total() });
           }
-          if (a.type === 'fold') { if (a.seat === seat) steps.push({ text: `Folded on the ${STREETS[k]}.`, n: null }); }
+          if (a.type === 'fold') { gone.add(a.seat); if (a.seat === seat) steps.push({ text: `Folded on the ${STREETS[k]}.`, n: null }); }
           else if (a.type !== 'check') { contrib[a.seat] = Math.max(contrib[a.seat], a.to); max = Math.max(max, a.to); }
-          if (a.type === 'bet' || a.type === 'raise') firstIn = false;
+          if (a.type === 'bet' || a.type === 'raise') { firstIn = false; called = 0; } else if (a.type === 'call') called++;
           if (a.seat === seat) firstIn = false;
         }
       }
@@ -571,7 +573,8 @@
     }
     // After the flop: the same frequencies your read assumes (ranges.js), played with its actual cards.
     const c = RG.classify(hole, board), facing = owe > 0;
-    const f = RG.freqs(c.key, { facing, price: facing ? owe / (pot + owe) : 0, river: board.length >= 5, cbet: m.frontier === 1 && m.street[0] && m.street[0].lastAgg === seat && !snap.actions.some(a => a.type === 'bet' || a.type === 'raise' || a.seat === seat), mods: RG.modsFor(style) });
+    const lastBet = snap.actions.map(x => x.type).lastIndexOf('raise') >= 0 || snap.actions.some(x => x.type === 'bet') ? Math.max(snap.actions.map(x => x.type).lastIndexOf('raise'), snap.actions.map(x => x.type).lastIndexOf('bet')) : -1;
+    const f = RG.freqs(c.key, { facing, others: Math.max(0, snap.liveAfter.length - 2), callers: facing ? snap.actions.slice(lastBet + 1).filter(x => x.type === 'call').length : 0, price: facing ? owe / (pot + owe) : 0, river: board.length >= 5, cbet: m.frontier === 1 && m.street[0] && m.street[0].lastAgg === seat && !snap.actions.some(a => a.type === 'bet' || a.type === 'raise' || a.seat === seat), mods: RG.modsFor(style) });
     if (!facing) return { action: rnd < f.big ? 'big' : rnd < f.big + f.small ? 'small' : 'check' };
     if (rnd < f.raise) return { action: c.key === 'S' && Math.random() < 0.3 ? 'big' : 'small' };
     return { action: rnd < f.raise + f.call ? 'call' : 'fold' };
@@ -643,7 +646,7 @@
         if (!a.cards || !a.cards.length) { o.cards = null; out.push('cards unknown'); }
         else { const p = parseCards(a.cards, [2], { hero: { cards: [] }, board: [], opponents: [] }); if (p.error) return { ok: false, error: p.error }; claim(sc, p.cards, 'opp' + seat); o.cards = p.cards; out.push(`cards ${prettyList(p.cards)}`); }
       }
-      if (a.style !== undefined) { const st = String(a.style || '').toLowerCase().trim(); if (st && E.STYLES[st] === undefined) return { ok: false, error: `Style must be one of: ${Object.keys(E.STYLES).join(', ')}.` }; o.style = st; out.push(st ? `style ${st}` : 'no style'); }
+      if (a.style !== undefined) { const st = String(a.style || '').toLowerCase().trim(); if (st && E.STYLES[st] === undefined) return { ok: false, error: `Style must be one of: ${Object.keys(E.STYLES).join(', ')}.` }; o.style = st; o.styleBy = a.by === 'stats' ? 'stats' : 'you'; out.push(st ? `style ${st}` : 'no style'); }
       if (a.range !== undefined) {
         const r = String(a.range || '').trim();
         if (r) { const pr = E.parseRange(r); if (pr.errors.length) return { ok: false, error: `Range problem: ${pr.errors.join('; ')}. Use notation like "QQ+, AKs, AQo+, A5s-A2s, 76s, top 15%".` }; out.push(`range ${r} (${round(pr.pct)}% of hands)`); }
@@ -689,7 +692,7 @@
       else if (type === 'small' || type === 'big') { to = ch[type].to; type = snap.max > 0 ? 'raise' : 'bet'; }
       if (!['fold', 'check', 'call', 'bet', 'raise'].includes(type)) return { ok: false, error: 'action must be fold, check, call, bet, raise or allin.' };
       if ((type === 'bet' || type === 'raise') && !to) to = ch.small.to;
-      sc.streets[s].actions.push({ seat, type, to });
+      sc.streets[s].actions.push({ seat, type, to, ...(a.auto ? { auto: true } : {}) }); // auto: played by the computer, not seen at a table
       const after = replay(sc);
       if (after.dropped) { sc.streets[s].actions.pop(); return { ok: false, error: 'That action is not possible here.' }; }
       sc.street = s;
@@ -783,6 +786,62 @@
     }
     const stacks = contrib.map((c, i) => Math.max(0, round(stackOf(w, i) - c + won[i])));
     return { stacks, won: won.map(round), showdown: inHand.length > 1, winners, played };
+  }
+
+  // ----- player stats, hand after hand -----
+  // What each player did this hand, from the actions seen or entered (moves the computer made for them don't count).
+  // → {name: {name, hands, vpip, pfr, agg (bets and raises after the flop), calls (calls after the flop)}} for players who
+  //   made a preflop decision of their own (a fold counts: folding is a decision)
+  function handStats(sc) {
+    const out = {}, m = money(sc);
+    sc.opponents.forEach((o, i) => {
+      const seat = i + 1, pre = (sc.streets[0].actions || []).filter(a => a.seat === seat);
+      if (!pre.length || pre.some(a => a.auto)) return;
+      const post = sc.streets.slice(1).flatMap(st => st.actions.filter(a => a.seat === seat && !a.auto));
+      const snap = m.street[0], applied = snap ? snap.actions.filter(a => a.seat === seat) : [];
+      out[o.name.toLowerCase()] = {
+        name: o.name, hands: 1,
+        vpip: applied.some(a => a.type === 'call' || a.type === 'raise' || a.type === 'bet') ? 1 : 0,
+        pfr: applied.some(a => a.type === 'raise' || a.type === 'bet') ? 1 : 0,
+        agg: post.filter(a => a.type === 'bet' || a.type === 'raise').length, calls: post.filter(a => a.type === 'call').length,
+      };
+    });
+    return out;
+  }
+  function addStats(book, hs) {
+    for (const [k, x] of Object.entries(hs)) {
+      const b = book[k] || (book[k] = { name: x.name, hands: 0, vpip: 0, pfr: 0, agg: 0, calls: 0 });
+      ['hands', 'vpip', 'pfr', 'agg', 'calls'].forEach(f => { b[f] += x[f]; }); b.name = x.name;
+    }
+    return book;
+  }
+  const STATS_MIN = 12; // hands before a style is read from the stats
+  // The style the numbers point to (one of the seat editor's styles), or null with too few hands.
+  // vpip/pfr: how often they put money in / raise before the flop; af: bets and raises after the flop per call.
+  function styleFromStats(b) {
+    if (!b || b.hands < STATS_MIN) return null;
+    const vpip = b.vpip / b.hands * 100, pfr = b.pfr / b.hands * 100, af = b.agg / Math.max(1, b.calls);
+    if (vpip < 15) return 'nit';
+    if (vpip >= 45 && pfr >= 25) return 'maniac';
+    if (vpip >= 35 && pfr < 12 && af < 1.2) return 'calling station';
+    if (vpip <= 24) return 'tight';
+    if (vpip >= 32) return pfr >= 20 ? 'maniac' : 'loose';
+    return 'regular';
+  }
+  function statsLine(b) {
+    if (!b || !b.hands) return '';
+    const p = x => Math.round(x / b.hands * 100);
+    return `${b.hands} hand${b.hands > 1 ? 's' : ''} · plays ${p(b.vpip)}% · raises ${p(b.pfr)}% preflop${b.agg + b.calls ? ` · aggression ${(b.agg / Math.max(1, b.calls)).toFixed(1)}` : ''}`;
+  }
+  // Sets each opponent's style from their stats, unless you set it yourself. → [text] of what changed
+  function applyStats(sc, book) {
+    const done = [];
+    sc.opponents.forEach(o => {
+      if (o.styleBy === 'you' || o.range) return;
+      const st = styleFromStats(book[o.name.toLowerCase()]);
+      if (st && st !== o.style) { o.style = st; o.styleBy = 'stats'; done.push(`${o.name}: ${st}`); }
+    });
+    return done;
   }
 
   // ----- matching the table on camera ("Sync table") -----
@@ -985,7 +1044,26 @@
         : '',
     };
     if (s3 === 0 && snap) ctx.pre = PS.preflop(preflopCtx(sc, 0, hero, m));
+    if (s3 > 0 && snap && !snap.complete && agg !== 'hero' && EV && board.length >= 3) ctx.ev = evFor(sc, s3, hero, board, m, live, post);
     return E.recommend(ctx);
+  }
+  // What each choice is worth for you now (ev.js), against each live opponent's read and style. Memoized: the panel
+  // redraws often, and the same spot always gives the same numbers (the sampling is seeded by the spot).
+  const evMemo = new Map();
+  function evFor(sc, s, hero, board, m, live, post) {
+    const snap = m.street[s], key = JSON.stringify([sc.streets, sc.opponents.map(o => [o.style, o.range, o.cards, o.stack]), sc.hero.stack, sc.button, sc.bigBlind, hero, board, s]);
+    if (evMemo.has(key)) return evMemo.get(key);
+    const ch = choices(sc, 0), unit = sc.bigBlind >= 2 ? 1 : sbOf(sc) < 0.5 ? 0.25 : 0.5;
+    let seed = 7; for (let i = 0; i < key.length; i++) seed = (Math.imul(seed, 31) + key.charCodeAt(i)) | 0;
+    const res = EV.evaluate({
+      hero, board, street: s, pot: m.potShow[s], toCall: m.toCall[s], max: snap.max, heroIn: snap.contrib[0], heroBehind: Math.max(0, stackOf(sc, 0) - m.contrib[0]),
+      minTo: ch ? ch.minTo : snap.max * 2, maxTo: ch ? ch.maxTo : Infinity, unit, inPosition: live.every(x => post.indexOf(0) > post.indexOf(x)),
+      opps: live.map(seat => ({ ...engineOpponent(sc, seat, s), mods: RG.modsFor(sc.opponents[seat - 1].style), in: snap.contrib[seat], behind: Math.max(0, stackOf(sc, seat) - m.contrib[seat]), after: post.indexOf(seat) > post.indexOf(0) })),
+      samples: 2500, seed,
+    });
+    if (evMemo.size > 200) evMemo.clear();
+    evMemo.set(key, res);
+    return res;
   }
   function preview(sc, s, hero, board, eq, m) {
     const snap = m.street[s], next = m.next, items = [];
@@ -1020,5 +1098,5 @@
     };
   }
 
-  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, readOf, engineOpponent, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, followBetting, settleHand, syncPlan, applySync, syncBetting, setUnit, getUnit, fmt };
+  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, readOf, engineOpponent, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, followBetting, settleHand, syncPlan, applySync, syncBetting, handStats, addStats, styleFromStats, statsLine, applyStats, STATS_MIN, setUnit, getUnit, fmt };
 });

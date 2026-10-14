@@ -173,6 +173,12 @@
   .gauge span:nth-child(3) { background: color-mix(in srgb, var(--good) 75%, transparent); border-radius: 0 6px 6px 0; }
   .gauge i { position: absolute; top: -5px; bottom: -5px; width: 4px; margin-left: -2px; border-radius: 2px; background: var(--fg); box-shadow: 0 0 0 2px var(--panel); transition: left .25s ease; }
   .adv-why { font-size: .8rem; }
+  .evl { display: grid; gap: 3px; }
+  .evr { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 64px; gap: 8px; align-items: center; font-size: .8rem; }
+  .evr.best { font-weight: 600; }
+  .evb { height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+  .evb i { display: block; height: 100%; background: var(--good); } .evb i.neg { background: var(--bad); }
+  .evv { font: 600 .8rem var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
   .adv-hand { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 2px; padding: 9px 12px; border-radius: 8px; background: color-mix(in srgb, var(--fg) 7%, transparent); }
   .adv-hand .hn { display: grid; gap: 1px; min-width: 0; }
   .adv-hand .hn b { font: 600 1.15rem var(--body); }
@@ -255,6 +261,7 @@
   .sp-range input { flex: 1; min-width: 0; font: 400 .82rem var(--mono); padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
   .sp-range button, .sp-btns button { padding: 4px 10px; font-size: .78rem; }
   .seatpop .note { margin: 0; }
+  .sp-stats { font-size: .76rem; } .sp-stats button { padding: 2px 8px; font-size: .74rem; }
   .spk { padding: 1px 7px; font-size: .9rem; line-height: 1.2; border-color: transparent; background: transparent; }
   .pk-act .note { margin-right: auto; }
 
@@ -523,6 +530,7 @@
 <script src="setup-parser.js"></script>
 <script src="strategy.js"></script>
 <script src="ranges.js"></script>
+<script src="ev.js"></script>
 <script src="scenario.js"></script>
 <script src="voice.js"></script>
 <script src="vision.js"></script>
@@ -629,13 +637,25 @@
   let lastResult = store.get('walkthrough.lastResult');
   function nextHand() {
     pendingFlop = [null, null, null]; pendingHero = [null, null]; autoRun++; pushUndo(); lastReply = null;
+    recordStats(); // what each player did this hand, before the rest is played out by the computer
     const res = SC.settleHand(scenario, { hero: hand.hero, opps: hand.opps, board: hand.board });
     const who = i => (i === 0 ? 'You' : scenario.opponents[i - 1].name), net = res.stacks[0] - scenario.hero.stack;
     lastResult = { hand: scenario.handNo, text: `${res.winners.map(who).join(' and ')} ${res.winners.length > 1 ? 'split' : res.winners[0] === 0 ? 'win' : 'wins'} ${money(res.won.reduce((a, b) => a + b, 0))}${res.showdown ? ' at showdown' : ''}`, net };
     store.set('walkthrough.lastResult', lastResult);
     SC.apply(scenario, 'next_hand', { stacks: res.stacks });
+    const styled = SC.applyStats(scenario, statsBook);
+    if (styled.length) lastResult.styles = styled;
+    store.set('walkthrough.lastResult', lastResult);
     loadScenario(scenario, { prev: null });
   }
+  // ----- player stats: hand after hand, by name -----
+  let statsBook = store.get('walkthrough.players') || {};
+  function recordStats() {
+    if (store.get('walkthrough.statsDeal') === scenario.deal) return; // this hand is already counted
+    const hs = SC.handStats(scenario); if (!Object.keys(hs).length) return;
+    SC.addStats(statsBook, hs); store.set('walkthrough.players', statsBook); store.set('walkthrough.statsDeal', scenario.deal);
+  }
+  const statsOf = o => statsBook[o.name.toLowerCase()] || null;
   function resetTable() {
     pendingFlop = [null, null, null]; pendingHero = [null, null]; autoRun++; pushUndo(); lastReply = null; lastResult = null; store.set('walkthrough.lastResult', null);
     const n = scenario.opponents.length, bb = scenario.bigBlind;
@@ -913,8 +933,8 @@
     const S = sim(step); if (!S) return null;
     try { return SC.recommendation(scenario, step, hand.hero, board(), S); } catch (e) { return null; }
   }
-  function act(action, amount) {
-    const res = SC.apply(scenario, 'act', { action, amount });
+  function act(action, amount, auto) {
+    const res = SC.apply(scenario, 'act', { action, amount, auto: !!auto }); // auto: the computer played it (not counted in player stats)
     if (!res.ok) { console.warn(res.error); return false; }
     loadScenario(scenario); return true;
   }
@@ -956,7 +976,7 @@
       const seat = m.next;
       if (seat === 0 && stopAtHero && !finishStreet) break;
       const a = seat === 0 ? { action: m.toCall[start] > 0 ? 'call' : 'check' } : SC.autoAction(scenario, seat, hand.opps[seat - 1], hand.board.slice(0, BOARD_N[start]));
-      if (!act(a.action, a.amount)) break;
+      if (!act(a.action, a.amount, seat !== 0)) break;
       await sleep(window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320);
     }
     return run === autoRun;
@@ -1111,6 +1131,13 @@
   const stackShown = x => SC.getUnit() === 'bb' ? Math.round(x / scenario.bigBlind * 10) / 10 : x;
   const stackFromInput = v => SC.getUnit() === 'bb' ? v * scenario.bigBlind : v;
   const canActTo = seat => !hand.m.ended && hand.m.frontier <= 3 && hand.m.foldedAt[seat] === null && !heroOut();
+  function statsRow(o) {
+    const b = statsOf(o); if (!b) return '<p class="note sp-stats">Stats: none yet. They build up from the hands you play here (moves the computer makes don\'t count).</p>';
+    const st = SC.styleFromStats(b);
+    const verdict = st ? (o.styleBy === 'stats' && o.style === st ? ` → <b>${esc(st)}</b> (set from the stats)` : ` → points to <b>${esc(st)}</b>`) : ` · a style from ${SC.STATS_MIN} hands`;
+    const use = st && !(o.styleBy === 'stats' && o.style === st) ? `<button type="button" data-sp="usestats">Use stats</button>` : '';
+    return `<div class="sp-row sp-stats"><span class="note">Stats: ${esc(SC.statsLine(b))}${verdict}</span>${use}<button type="button" data-sp="clearstats" title="Forget this player's stats">Clear</button></div>`;
+  }
   function openSeat(seat) {
     seatEdit = seat; document.body.classList.add('is-editing'); const el = $('seatpop'), pos = hand.pos[seat];
     const unitL = SC.getUnit() === 'bb' ? 'BB' : '$';
@@ -1126,6 +1153,7 @@
       <div class="sp-row"><span class="sp-l">Plays</span><div class="sp-chips">${STYLE_CHIPS.map(([v, l]) => `<button type="button" data-sp-style="${v}" class="${!o.range && (o.style || '') === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
       <div class="sp-row"><span class="sp-l">Range</span><div class="sp-chips">${[8, 15, 25, 40].map(p => `<button type="button" data-sp-range="top ${p}%" class="${o.range === `top ${p}%` ? 'on' : ''}">Top ${p}%</button>`).join('')}</div></div>
       <form class="sp-range" data-sp-form><input name="range" value="${esc(o.range || '')}" placeholder="e.g. TT+, AQs+, AKo" aria-label="Range"><button type="submit">Set</button></form>
+      ${statsRow(o)}
       <p class="note">${o.cards ? `Known cards: ${o.cards.map(c => E.cardText(E.cardFromCode(c))).join(' ')}` : `Your read: ${esc(SC.seatRangeLabel(scenario, seat, Math.min(step, 3)))}. The hands are in the panel.`}</p>
       <div class="sp-row sp-btns"><button type="button" data-sp="cards">${o.cards ? 'Change cards' : 'Set their cards'}</button>${o.cards ? '<button type="button" data-sp="unknown">Make unknown</button>' : ''}<button type="button" data-sp="sit" title="Move yourself to this seat's position">Sit here</button></div>
       <div class="sp-row sp-btns">${seatBtns}</div>${stackRow(o.stack)}`;
@@ -1148,6 +1176,8 @@
     if ('spStyle' in b.dataset) { edit('set_opponent', { seat, style: b.dataset.spStyle, range: '' }); return openSeat(seat); }
     if (b.dataset.spRange) { edit('set_opponent', { seat, range: b.dataset.spRange }); return openSeat(seat); }
     if (b.dataset.sp === 'cards') { closeSeat(); return openPicker({ kind: 'opp', seat, i: 0 }); }
+    if (b.dataset.sp === 'usestats') { const o = scenario.opponents[seat - 1], st = SC.styleFromStats(statsOf(o)); if (st) edit('set_opponent', { seat, style: st, range: '', by: 'stats' }); return openSeat(seat); }
+    if (b.dataset.sp === 'clearstats') { const o = scenario.opponents[seat - 1]; delete statsBook[o.name.toLowerCase()]; store.set('walkthrough.players', statsBook); return openSeat(seat); }
     if (b.dataset.sp === 'unknown') { edit('set_opponent', { seat, cards: null }); return openSeat(seat); }
     if (b.dataset.sp === 'sit') { closeSeat(); edit('setup_table', { hero_position: hand.pos[seat] }); }
   });
@@ -1771,7 +1801,14 @@
     return `<section class="blk advice ${cls}"><h3 title="A rule of thumb, not a solver">What you should do</h3>
       <div class="adv-top"><span class="adv-act">${esc(r.label)}</span>${size ? `<span class="adv-size">${size}</span>` : ''}${r.close ? '<span class="chip">close call</span>' : ''}</div>
       <div class="gauge" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${r.gauge}" aria-label="Recommendation strength from fold to raise"><span>Fold</span><span>Check · Call</span><span>Bet · Raise</span><i style="left:${r.gauge}%"></i></div>
+      ${r.ev ? evList(r.ev) : ''}
       <ul class="adv-why">${r.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>${r.note ? `<p class="note">${esc(r.note)}</p>` : ''}${handLine(S)}</section>`;
+  }
+  // What each choice is worth (chips you can expect to win or lose from here), best first.
+  function evList(ev) {
+    const name = o => o.key === 'fold' ? 'Fold' : o.key === 'check' ? 'Check' : o.key === 'call' ? `Call ${money(o.add)}` : o.allIn ? `All-in ${money(o.to)}` : o.key === 'bet' ? `Bet ${money(o.add)} <span class="note">${Math.round(o.potShare * 100)}%</span>` : `Raise to ${money(o.to)}`;
+    const top = Math.max(...ev.map(o => Math.abs(o.ev)), 1e-9);
+    return `<div class="evl" title="What each choice is worth on average: the chips you can expect to win (+) or lose (−) from here, against their likely hands and how they tend to answer">${ev.slice(0, 5).map((o, i) => `<div class="evr${i === 0 ? ' best' : ''}"><span class="evn">${i === 0 ? '★ ' : ''}${name(o)}</span><span class="evb"><i class="${o.ev < 0 ? 'neg' : ''}" style="width:${Math.max(2, Math.abs(o.ev) / top * 100)}%"></i></span><span class="evv">${o.ev >= 0 ? '+' : '−'}${money(Math.abs(o.ev))}</span></div>`).join('')}</div>`;
   }
   function rangeList(s) {
     const seats = liveSeats(s); if (!seats.length) return '';
@@ -1804,7 +1841,8 @@
   // Under "Start camera": the hand number and how the last hand went.
   function renderDockInfo() {
     const last = lastResult && lastResult.hand === scenario.handNo - 1 ? ` · last hand: ${esc(lastResult.text)}${lastResult.net ? ` (you ${lastResult.net > 0 ? '+' : '−'}${money(Math.abs(lastResult.net))})` : ''}` : '';
-    $('dockInfo').innerHTML = `<b>Hand ${scenario.handNo}</b>${last}`;
+    const sty = lastResult && lastResult.hand === scenario.handNo - 1 && lastResult.styles ? ` · from their stats: ${esc(lastResult.styles.join(', '))}` : '';
+    $('dockInfo').innerHTML = `<b>Hand ${scenario.handNo}</b>${last}${sty}`;
   }
   function waitingBlock() {
     const last = lastResult && lastResult.hand === scenario.handNo - 1 ? `<p class="note">Last hand: ${esc(lastResult.text)}${lastResult.net ? ` (you ${lastResult.net > 0 ? '+' : '−'}${money(Math.abs(lastResult.net))})` : ''}.</p>` : '';
@@ -1936,6 +1974,7 @@
     const folded = m.foldedAt[seat] !== null && m.foldedAt[seat] <= s3;
     let html = `<section class="blk"><h3 title="Built only from what you can see: their seat, the style you gave them, how they've bet, the board and your own cards. Their actual cards are never used.">Your read on ${esc(o.name)} <small>${esc(hand.pos[seat])} · ${STEP[step].toLowerCase()}</small></h3>
 `;
+    if (statsOf(o)) html += `<p class="note">Stats: ${esc(SC.statsLine(statsOf(o)))}${o.style ? ` · playing them as ${esc(o.style)}${o.styleBy === 'stats' ? ' (from the stats)' : ''}` : ''}</p>`;
     if (r.kind === 'known') { html += `<p>You set their cards: ${miniCards(o.cards.map(E.cardFromCode))}</p></section>`; return html; }
     // your hand against this read (heads-up)
     let eqTxt = '';

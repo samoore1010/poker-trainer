@@ -12,11 +12,14 @@ A Texas Hold'em trainer. Set up any spot by talking to the coach, picking cards,
 
 - **Scenario** (`public/scenario.js`): one JSON record for the hand: seats, positions, stacks, your cards, the board, each opponent's known cards / range / style, and every action on every street in turn order (`replay()` turns it into pots, whose turn it is and who is still in). The table, the stats and the agent all read and write it.
 - **Engine** (`public/engine.js`): exact 7-card evaluator, range parsing, and equity. Opponents are drawn from their ranges with card removal; with one opponent left on the turn or river every outcome is enumerated (exact), otherwise it simulates 6,000–14,000 deals. Runs in a Web Worker in the browser and in Node on the server.
-- **What you should do** (`strategy.js` preflop, `recommend` in `engine.js` after the flop): a rule-of-thumb gauge at the top of the Read tab, aimed at a disciplined long-run player who folds most hands. It is not a solver.
+- **What you should do** (`strategy.js` preflop, `ev.js` and `recommend` in `engine.js` after the flop): the advice at the top of the Read tab. It is not a solver.
   - **Preflop:** standard 100-big-blind charts. Raise first in by seat (about 16% of hands under the gun six-handed, 46% on the button; nobody limps), 3-bet / call / fold against a raise by your seat and the raiser's, tighter with callers in, 4-bet / call / fold against a 3-bet, premiums only against a 4-bet. Limped pots: raise the limpers, overlimp a few suited hands late, complete the small blind, check the big blind.
-  - **After the flop:** your win chance against the price, discounted out of position (you won't see every card or get paid every time you hit): about 80% of it on the flop and 90% on the turn. Draws call only when they're close to the price. Value bets depend on win chance, board texture, number of opponents and calling stations.
+  - **After the flop: what each choice is worth** (`ev.js`). Every option you have (fold, check, call, bet a third / two thirds / the pot, an overbet heads-up on the turn and river, raise 3x or pot, all-in when stacks are short) gets a number: the chips you can expect to win or lose from here. Thousands of sampled deals draw each opponent's hand from your read on them, and they fold, call or raise with the frequencies their kind of hand has at that price, adjusted for their style (stations call light, nits fold, overcalls in multiway pots are tighter). Checking lets the players behind bet, and you then call or fold, whichever pays. The best option is the advice; the panel lists the top five with their values, how often they'd fold, and whether to call a re-raise. Out of position your share is discounted (about 80% on the flop, 90% on the turn), since you won't see every card or get paid every time you hit. Multiway, facing a bet, it only raises very strong hands.
+  - **Limits:** it looks one street ahead (later streets only through that discount), plays one hand rather than a balanced range, and is only as good as the reads. Solvers bet small with strong hands on dry flops because of what that does for their whole range over later streets; this engine prefers bigger bets there.
   - **Opponents' hands:** the odds and the advice use your read on each player (below), or their cards if you set them.
   - **Before your turn** it previews your decision: *If it folds to you: Raise to $5*, *If UTG raises to $5: Fold*.
+  - **Benchmark** (`npm run bench`, `test/bench/`): 149 standard spots with the answers good players broadly agree on (consensus picks, not solver output): opens, defending, 3-bets, value bets and sizing, folding air, raising the nuts, bluffing a nit, not bluffing a station, thin value, calling a maniac, folding to a nit. It prints the score by category and every miss (`-v` for the reasons). The tests keep the score from going down. Currently 142/149: the misses are small-sizing on dry flops (5) and two close bluffs against a station.
+- **Player stats** (`handStats` / `styleFromStats` in `scenario.js`): every hand you play here is counted per player by name: how often they put money in before the flop, how often they raise, and how aggressive they are after it. Moves the computer made for them don't count, so this measures the real players you enter by hand or follow with the camera. After 12 hands a style follows from the numbers (nit, tight, regular, loose, calling station, maniac) and is applied at the next hand, unless you set their style yourself. The player's editor shows the stats with **Use stats** and **Clear**; their range tab shows them too.
 - **Your read on a player** (`ranges.js`, `readOf` in `scenario.js`): click any opponent and a *range* tab opens in the panel with the hands you should put them on (A6, 66… with suits only where they matter for a flush), grouped by what they make on the board, likeliest group first (nothing last), how the range narrowed step by step, and how your hand does against it. It's built only from what you can see: their seat, the style you gave them, their bets, the board and your own cards (card removal). Their hidden cards are never used.
   - Preflop it starts from the chart range for what they did (opened, called, 3-bet, limped), wider or tighter for their style.
   - After the flop every possible hand is weighted by how likely it is to have taken each action: big bets are polarized (strong hands, draws, some bluffs), small bets wide, calls condensed (pairs and draws; monsters would raise), checks capped (strong hands usually bet). Styles shift it: stations call with weak pairs, nits rarely bluff, maniacs bluff a lot.
@@ -120,6 +123,7 @@ public/
   engine.js          poker math (shared by browser, worker and server)
   strategy.js        preflop charts: advice, computer players, opponents' likely ranges (shared)
   ranges.js          hand reading after the flop: how each kind of hand acts, by style (shared)
+  ev.js              what each choice is worth after the flop (shared)
   scenario.js        the scenario record and the edit operations (shared)
   stats-worker.js    runs the engine off the main thread
   voice.js           HandVoice: recorder + level meter, API client, speak()
@@ -135,6 +139,7 @@ server/
   lib/cards.js       card codes + JSON schema for the AI card parser
   routes/            system, voice, cards, agent: one file per feature
 scripts/check-openai.js   verifies keys and models
+scripts/benchmark.js      scores the advice against test/bench/spots.js (npm run bench)
 test/                node:test suites
 ```
 

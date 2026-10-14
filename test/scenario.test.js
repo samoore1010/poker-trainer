@@ -271,3 +271,26 @@ test('sync table: offers only what was read clearly, applies picked lines, keeps
   // seats unreadable: nothing at all
   assert.equal(S.syncPlan(sc, { ...T, readable: { ...T.readable, seats: false } }).length, 0);
 });
+
+test('player stats: only real decisions count; a style follows from enough hands; your own call wins', () => {
+  const sc = S.create({ opponents: 2, stack: 200, randomStacks: false });
+  sc.opponents[0].name = 'Ravi'; sc.opponents[1].name = 'Greta';
+  const pos = S.positions(sc), seatOf = p => pos.indexOf(p); // you BB: BTN and SB act first
+  S.apply(sc, 'act', { seat: seatOf('BTN'), action: 'call' });
+  S.apply(sc, 'act', { seat: seatOf('SB'), action: 'raise', amount: 8, auto: true }); // the computer's move
+  const hs = S.handStats(sc);
+  assert.deepEqual(Object.keys(hs), [sc.opponents[seatOf('BTN') - 1].name.toLowerCase()]);
+  assert.equal(Object.values(hs)[0].vpip, 1); assert.equal(Object.values(hs)[0].pfr, 0);
+  // 20 hands of calling almost everything, never raising: a calling station
+  const book = {};
+  for (let i = 0; i < 20; i++) S.addStats(book, { ravi: { name: 'Ravi', hands: 1, vpip: i % 5 ? 1 : 0, pfr: 0, agg: 0, calls: 2 } });
+  assert.equal(S.styleFromStats(book.ravi), 'calling station');
+  assert.equal(S.styleFromStats({ hands: 5, vpip: 5, pfr: 0, agg: 0, calls: 0 }), null); // too few hands
+  assert.equal(S.styleFromStats({ hands: 30, vpip: 3, pfr: 2, agg: 1, calls: 1 }), 'nit');
+  assert.equal(S.styleFromStats({ hands: 30, vpip: 6, pfr: 5, agg: 5, calls: 3 }), 'tight');
+  assert.deepEqual(S.applyStats(sc, book), ['Ravi: calling station']);
+  assert.equal(sc.opponents[0].styleBy, 'stats');
+  S.apply(sc, 'set_opponent', { seat: 1, style: 'nit' }); // you know better
+  assert.deepEqual(S.applyStats(sc, book), []); assert.equal(sc.opponents[0].style, 'nit');
+  assert.equal(S.normalize(sc).scenario.opponents[0].styleBy, 'you');
+});
