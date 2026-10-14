@@ -1566,10 +1566,13 @@
   function applyLive(T, capturedAt) {
     if (cam.anim) { cam.pendingLive = [T, capturedAt]; return; }
     noteRotation(T.rotate);
+    const street = aiCards() && T.readable.cards && T.board ? BOARD_N.indexOf(T.board.length) : Math.max(0, BOARD_N.indexOf(scenario.board.length));
+    // the readings before this one count too (bets confirmed by two in a row, swept chips remembered, folds by majority);
+    // then your corrections on top
+    if (T.readable.betting && T.seats.length) { const r = SC.smoothReading(cam.mem, T, `${scenario.deal}:${street}`, `${scenario.deal}`); cam.mem = r.mem; T = r.T; }
     T = pinned(T);
     if (T.live && T.seats.length && T.seats.length !== scenario.opponents.length + 1) cam.live.seatMiss++; // the seats no longer match: a full read will sort it out
     cam.sync = T.live && cam.sync ? { ...cam.sync, ...T, readable: { ...cam.sync.readable, cards: T.readable.cards, betting: T.readable.betting }, seats: cam.sync.seats.length === T.seats.length ? cam.sync.seats.map((x, i) => ({ ...x, ...T.seats[i], name: x.name, stack: x.stack, dealer: x.dealer })) : T.seats } : T;
-    const street = aiCards() && T.readable.cards && T.board ? BOARD_N.indexOf(T.board.length) : Math.max(0, BOARD_N.indexOf(scenario.board.length));
     const after = () => {
       if (aiCards() && T.readable.cards && (T.hero || (T.board && T.board.length))) {
         const A = { hero: T.hero, board: T.board }, p = planFor(A, true), k = readKey(A);
@@ -1585,7 +1588,7 @@
   // matches with or without this street's bets counts as agreeing (apps differ on which they show).
   function followPot(T, street) {
     const L = cam.live, m = hand.m, s = Math.min(m.frontier, 3);
-    if (!T.pot || m.ended || s !== street || !T.readable.betting) { L.potKey = ''; return; }
+    if (!T.pot || m.ended || s !== street || !T.readable.betting || T.settled === false) { L.potKey = ''; return; } // (only a settled reading: no bet still waiting to be confirmed)
     const seen = T.pot * (T.unit === 'bb' ? scenario.bigBlind : 1), near = (a, b) => Math.abs(a - b) < 0.01 * Math.max(1, scenario.bigBlind) + 1e-9;
     if (near(seen, m.potShow[s]) || near(seen, m.potStart[s])) { L.potKey = ''; return; }
     const key = `${scenario.deal}:${s}:${seen}`;

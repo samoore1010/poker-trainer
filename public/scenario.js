@@ -104,7 +104,7 @@
     const TYPES = ['fold', 'check', 'call', 'bet', 'raise'];
     sc.streets = [0, 1, 2, 3].map(s => {
       const st = streets[s] && typeof streets[s] === 'object' ? streets[s] : {};
-      const actions = (Array.isArray(st.actions) ? st.actions : []).filter(a => a && TYPES.includes(a.type)).map(a => ({ seat: Math.round(num(a.seat, -1)), type: a.type, to: Math.max(0, num(a.to, 0)), ...(a.auto ? { auto: true } : {}), ...(a.filled ? { filled: true } : {}) })).filter(a => a.seat >= 0 && a.seat <= n);
+      const actions = (Array.isArray(st.actions) ? st.actions : []).filter(a => a && TYPES.includes(a.type)).map(a => ({ seat: Math.round(num(a.seat, -1)), type: a.type, to: Math.max(0, num(a.to, 0)), ...(a.auto ? { auto: true } : {}), ...(a.filled ? { filled: true } : {}), ...(a.cam ? { cam: true } : {}) })).filter(a => a.seat >= 0 && a.seat <= n);
       const plan = st.plan && Array.isArray(st.plan.folds) ? { folds: st.plan.folds.map(x => Math.round(num(x, -1))).filter(x => x >= 1 && x <= n) } : undefined;
       return plan ? { actions, plan } : { actions };
     });
@@ -535,7 +535,7 @@
       if (m.ended || m.frontier !== s || !snap || snap.complete) break;
       if (snap.next === seat) return { ok: true, log };
       const owe = snap.max - snap.contrib[snap.next], type = owe > 0 ? how : 'check';
-      sc.streets[s].actions.push({ seat: snap.next, type, to: 0 });
+      sc.streets[s].actions.push({ seat: snap.next, type, to: 0, filled: true }); // not decisions anyone saw
       log.push(`${seatName(sc, snap.next)} ${type === 'fold' ? 'folds' : type === 'call' ? 'calls' : 'checks'}`);
     }
     // they won't get to act again going forward: take the betting back to their last turn instead
@@ -694,7 +694,9 @@
       else if (type === 'small' || type === 'big') { to = ch[type].to; type = snap.max > 0 ? 'raise' : 'bet'; }
       if (!['fold', 'check', 'call', 'bet', 'raise'].includes(type)) return { ok: false, error: 'action must be fold, check, call, bet, raise or allin.' };
       if ((type === 'bet' || type === 'raise') && !to) to = ch.small.to;
-      sc.streets[s].actions.push({ seat, type, to, ...(a.auto ? { auto: true } : {}) }); // auto: played by the computer, not seen at a table
+      // where it came from: auto = played by the computer; filled = filled in (a guess to close a gap, not seen); cam = seen
+      // by the camera; none = entered by you
+      sc.streets[s].actions.push({ seat, type, to, ...(a.auto ? { auto: true } : {}), ...(a.filled ? { filled: true } : {}), ...(a.cam ? { cam: true } : {}) });
       const after = replay(sc);
       if (after.dropped) { sc.streets[s].actions.pop(); return { ok: false, error: 'That action is not possible here.' }; }
       sc.street = s;
@@ -830,20 +832,23 @@
   }
 
   // ----- player stats, hand after hand -----
-  // What each player did this hand, from the actions seen or entered (moves the computer made for them don't count).
+  // What each player did this hand, from the actions seen or entered (moves the computer made for them, and actions
+  // filled in to close a gap, don't count).
   // → {name: {name, hands, vpip, pfr, agg (bets and raises after the flop), calls (calls after the flop)}} for players who
   //   made a preflop decision of their own (a fold counts: folding is a decision)
   function handStats(sc) {
     const out = {}, m = money(sc);
+    // the applied actions line up with the recorded ones (replay keeps their order); only real decisions count: not the
+    // computer's moves (auto), and not the calls, checks and folds filled in to close a gap nobody saw (filled)
+    const real = (s, seat) => { const snap = m.street[s]; if (!snap) return []; return snap.actions.filter((a, i) => a.seat === seat && !sc.streets[s].actions[i].auto && !sc.streets[s].actions[i].filled); };
     sc.opponents.forEach((o, i) => {
-      const seat = i + 1, pre = (sc.streets[0].actions || []).filter(a => a.seat === seat);
-      if (!pre.length || pre.some(a => a.auto)) return;
-      const post = sc.streets.slice(1).flatMap(st => st.actions.filter(a => a.seat === seat && !a.auto));
-      const snap = m.street[0], applied = snap ? snap.actions.filter(a => a.seat === seat) : [];
+      const seat = i + 1, pre = real(0, seat);
+      if (!pre.length) return; // no preflop decision of theirs on record
+      const post = [1, 2, 3].flatMap(s => real(s, seat));
       out[o.name.toLowerCase()] = {
         name: o.name, hands: 1,
-        vpip: applied.some(a => a.type === 'call' || a.type === 'raise' || a.type === 'bet') ? 1 : 0,
-        pfr: applied.some(a => a.type === 'raise' || a.type === 'bet') ? 1 : 0,
+        vpip: pre.some(a => a.type === 'call' || a.type === 'raise' || a.type === 'bet') ? 1 : 0,
+        pfr: pre.some(a => a.type === 'raise' || a.type === 'bet') ? 1 : 0,
         agg: post.filter(a => a.type === 'bet' || a.type === 'raise').length, calls: post.filter(a => a.type === 'call').length,
       };
     });
@@ -970,7 +975,7 @@
       for (let s = 0; s < Math.min(street, 4); s++) {
         const acts = w.streets[s].actions, mine = acts.filter(a => a.seat === seat);
         if (!mine.length || !mine.every(a => a.filled)) continue;
-        const i = acts.indexOf(mine[0]); acts[i] = { seat, type: 'fold', to: 0 };
+        const i = acts.indexOf(mine[0]); acts[i] = { seat, type: 'fold', to: 0, cam: true };
         for (let j = acts.length - 1; j > i; j--) if (acts[j].seat === seat) acts.splice(j, 1);
         for (let t = s + 1; t < 4; t++) w.streets[t].actions = w.streets[t].actions.filter(a => a.seat !== seat);
         repaired = true; log.push(`${seatName(w, seat)} folded on the ${STREETS[s]}`); break;
@@ -982,13 +987,14 @@
     const m0 = money(w);
     for (let seat = 0; seat < players; seat++) if (!seen[seat].folded && m0.foldedAt[seat] !== null && m0.foldedAt[seat] <= street) return { ok: false, error: `${seatName(w, seat)} is shown in the hand but works out folded`, wrongTurn: true };
     if (m0.ended && (street > m0.ended.street || T.toAct !== null)) return { ok: false, error: 'the hand goes on in the picture but is over on this table', wrongTurn: true };
-    const act = (seat, action, amount) => { const r = apply(w, 'act', { seat, action, amount }); if (r.ok) log.push(r.summary.replace(/^\w+: /, '')); return r.ok; };
+    const act = (seat, action, amount, how = { cam: true }) => { const r = apply(w, 'act', { seat, action, amount, ...how }); if (r.ok) log.push(r.summary.replace(/^\w+: /, '')); return r.ok; };
     let partial = false;
     for (let guard = 0; guard < 80; guard++) {
       const m = money(w);
       if (m.ended || m.frontier > street || m.next === null) break;
       const s = m.frontier, snap = m.street[s], seat = m.next, x = seen[seat];
-      if (s < street) { if (!act(seat, x.folded ? 'fold' : snap.max > snap.contrib[seat] ? 'call' : 'check')) { partial = true; break; } continue; }
+      // a street the camera didn't see the end of: folds are seen (the seat shows folded), the calls and checks are a guess
+      if (s < street) { if (!act(seat, x.folded ? 'fold' : snap.max > snap.contrib[seat] ? 'call' : 'check', 0, x.folded ? { cam: true } : { filled: true })) { partial = true; break; } continue; }
       if (T.toAct === seat) break; // their turn now
       if (T.toAct === null && !T.live && (x.last === 'none' || x.last === 'post') && !x.folded) break; // not acted yet (a quick live reading names no last actions: nobody to act there means everyone has)
       if (x.folded) { if (!act(seat, 'fold')) { partial = true; break; } continue; }
@@ -1010,6 +1016,36 @@
       if (T.toAct !== null && m.next !== null && m.next !== T.toAct) return { ok: false, error: `it should be ${seatName(w, T.toAct)}'s turn but works out to ${seatName(w, m.next)}'s` };
     }
     return { ok: true, sc: w, log, partial, repaired };
+  }
+  // Memory of the readings, so one reading never decides alone: the camera reads the table several times a second, and
+  // a single reading can be wrong, or come just after the chips were swept into the pot.
+  //   bets (per street): a seat's bet changes once two readings in a row agree on it (one-off misreads are ignored, and
+  //     a wrong figure is put right the same way); when every bet drops to nothing at once (the chips swept into the pot
+  //     at the end of the street), the bets seen before stay until the next street.
+  //   folds (per hand): most of the last five readings decide (a player doesn't fold, or come back, on one reading).
+  //   whose turn (per street): like the bets, two readings in a row.
+  // mem: the memory from the last call (or null); streetKey / handKey: identify the street and the hand.
+  // → {mem, T} with T's seats bet and folded replaced by the remembered ones
+  function smoothReading(mem, T, streetKey, handKey) {
+    const n = T.seats.length;
+    if (!mem || mem.hand !== handKey || mem.n !== n) mem = { hand: handKey, n, street: null, bets: [], prev: [], swept: false, folds: T.seats.map(() => []) };
+    if (mem.street !== streetKey) { mem.street = streetKey; mem.bets = T.seats.map(x => x.bet); mem.prev = T.seats.map(x => x.bet); mem.swept = false; mem.toAct = T.toAct; mem.prevToAct = T.toAct; }
+    // whose turn: the same rule as the bets (two readings in a row), so the turn never moves on ahead of the chips
+    if (T.toAct === mem.prevToAct) mem.toAct = T.toAct;
+    mem.prevToAct = T.toAct;
+    const now = T.seats.map(x => x.bet);
+    const sweep = now.every(b => !b) && mem.prev.every(b => !b) && mem.bets.some(b => b > 0); // (twice: not one blank reading)
+    if (sweep) mem.swept = true;
+    if (!mem.swept) mem.bets = mem.bets.map((b, i) => (now[i] === mem.prev[i] ? now[i] : b));
+    mem.prev = now;
+    const seats = T.seats.map((x, i) => {
+      const f = mem.folds[i]; f.push(!!x.folded); if (f.length > 5) f.shift();
+      const folded = f.length < 3 ? !!x.folded : f.filter(Boolean).length >= 3;
+      return { ...x, bet: mem.bets[i], folded };
+    });
+    // settled: every bet, fold and the turn in this reading is already confirmed (nothing still waiting for a second look)
+    const settled = !mem.swept && seats.every((x, i) => x.bet === T.seats[i].bet && x.folded === !!T.seats[i].folded) && mem.toAct === T.toAct;
+    return { mem, T: { ...T, seats, toAct: mem.toAct, settled } };
   }
   // When the camera and this table disagree, the camera wins: the street on the picture is rebuilt from the picture
   // alone (its actions are dropped and replayed from the chips, folds and whose turn); if that still doesn't fit, the
@@ -1233,5 +1269,5 @@
     };
   }
 
-  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, readOf, engineOpponent, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, followBetting, trackTable, rebuildFrom, settleHand, syncPlan, applySync, syncBetting, handStats, addStats, styleFromStats, statsLine, applyStats, STATS_MIN, setUnit, getUnit, fmt };
+  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, readOf, engineOpponent, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, followBetting, trackTable, rebuildFrom, smoothReading, settleHand, syncPlan, applySync, syncBetting, handStats, addStats, styleFromStats, statsLine, applyStats, STATS_MIN, setUnit, getUnit, fmt };
 });
