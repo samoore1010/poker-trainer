@@ -322,3 +322,20 @@ test('live tracking: follows chips, folds and whose turn; repairs folds a fast f
   const bad = table({ UTG: { folded: true }, HJ: { folded: true }, BTN: { folded: true }, SB: { folded: true } }, at('CO'));
   assert.equal(S.trackTable(r2.sc, bad, 1).ok, false);
 });
+
+test('live tracking: a wrong table is rebuilt from the camera (the camera wins)', () => {
+  const sc = S.create({ opponents: 3, stack: 200, randomStacks: false });
+  const pos = S.positions(sc), at = p => pos.indexOf(p);
+  // the table has UTG folding, but the camera shows UTG raised to 6 and it's the button's turn
+  S.apply(sc, 'act', { seat: at('UTG'), action: 'fold' });
+  const seat = (o = {}) => ({ name: '', stack: 190, dealer: false, folded: false, bet: 0, last: 'none', ...o });
+  const T = { unit: 'chips', pot: 9, toAct: at('BTN'), seats: pos.map(p => seat({ ...(p === 'UTG' ? { bet: 6 } : p === 'SB' ? { bet: 1 } : p === 'BB' ? { bet: 2 } : {}) })) };
+  assert.equal(S.trackTable(sc, T, 0).ok, false);
+  const r = S.rebuildFrom(sc, T, 0);
+  assert.ok(r.ok, r.error); assert.equal(r.scope, 'street');
+  const m = S.money(r.sc);
+  assert.equal(m.foldedAt[at('UTG')], null); assert.equal(m.street[0].max, 6); assert.equal(m.next, at('BTN'));
+  // a seat whose chips don't match the table is a disagreement too
+  const T2 = { ...T, seats: T.seats.map((x, i) => i === at('UTG') ? { ...x, bet: 8 } : x) };
+  assert.equal(S.trackTable(r.sc, T2, 0).ok, false);
+});

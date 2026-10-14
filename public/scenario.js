@@ -958,10 +958,33 @@
         const x = seen[seat];
         if (x.folded && m.foldedAt[seat] === null) return { ok: false, error: `${seatName(w, seat)} is shown folded but works out still in` };
         if (!x.folded && m.foldedAt[seat] !== null && m.foldedAt[seat] <= street) return { ok: false, error: `${seatName(w, seat)} is shown in the hand but works out folded` };
+        // everyone who has acted on this street shows the chips this table has them putting in
+        if (!x.folded && snap.actions.some(a => a.seat === seat) && !near(snap.contrib[seat], x.bet) && !(x.stack === 0)) return { ok: false, error: `${seatName(w, seat)} shows ${round(x.bet)} in front, this table has ${round(snap.contrib[seat])}` };
       }
       if (T.toAct !== null && m.next !== null && m.next !== T.toAct) return { ok: false, error: `it should be ${seatName(w, T.toAct)}'s turn but works out to ${seatName(w, m.next)}'s` };
     }
-    return { ok: true, sc: w, log, partial };
+    return { ok: true, sc: w, log, partial, repaired };
+  }
+  // When the camera and this table disagree, the camera wins: the street on the picture is rebuilt from the picture
+  // alone (its actions are dropped and replayed from the chips, folds and whose turn); if that still doesn't fit, the
+  // whole hand is rebuilt (earlier streets: folded players fold, the rest call), but only when the pot then matches.
+  // → {ok, sc, log, scope: 'street'|'hand'} or {ok: false, error}
+  function rebuildFrom(sc, T, street) {
+    const tryFrom = from => {
+      const w = clone(sc);
+      for (let s = from; s < 4; s++) w.streets[s] = blankStreet();
+      w.street = Math.min(w.street, from);
+      return trackTable(w, T, street);
+    };
+    const a = tryFrom(street);
+    if (a.ok && !a.partial) return { ...a, scope: 'street' };
+    if (street > 0) {
+      const b = tryFrom(0);
+      const k = T.unit === 'bb' ? sc.bigBlind : 1;
+      if (b.ok && T.pot && Math.abs(money(b.sc).potShow[Math.min(street, 3)] - T.pot * k) < 0.01 * Math.max(1, sc.bigBlind) + 1e-9) return { ...b, scope: 'hand' };
+    }
+    if (a.ok) return { ...a, scope: 'street' };
+    return { ok: false, error: a.error };
   }
 
   // ----- following the betting a camera saw -----
@@ -1152,5 +1175,5 @@
     };
   }
 
-  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, readOf, engineOpponent, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, followBetting, trackTable, settleHand, syncPlan, applySync, syncBetting, handStats, addStats, styleFromStats, statsLine, applyStats, STATS_MIN, setUnit, getUnit, fmt };
+  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, readOf, engineOpponent, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, followBetting, trackTable, rebuildFrom, settleHand, syncPlan, applySync, syncBetting, handStats, addStats, styleFromStats, statsLine, applyStats, STATS_MIN, setUnit, getUnit, fmt };
 });
