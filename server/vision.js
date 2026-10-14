@@ -92,6 +92,19 @@ const LIVE_SCHEMA = {
 const BETTING_SCHEMA = { ...SCHEMA, required: SCHEMA.required.concat(['betting']), properties: { ...SCHEMA.properties, betting: BETTING } };
 const DEFAULT_PLAYER = 'the two face-up cards at the bottom centre of the picture, nearest the camera (in the Hand Walkthrough app they sit beside the name plate "You")';
 
+// How to tell the parts of any poker table apart (a real one or any app), so a card next to a player is never taken
+// for the board, or the board for a player's cards. General on purpose: it holds whatever the layout.
+const READING_GUIDE = [
+  'How to read any poker table:',
+  '- The board (community cards) is one row of face-up cards near the middle of the table, usually next to the pot. It has 0, 3, 4 or 5 cards, never 1 or 2, and it belongs to no player.',
+  '- A player\'s own cards lie beside that player\'s avatar or name plate, not in the middle row. The followed player\'s two cards are often larger, tilted, or set off the felt at the bottom edge next to their plate. Cards beside a player belong to that player, even if they are near the middle.',
+  '- Face-down cards (card backs) beside an avatar are that player\'s hidden cards: never board cards.',
+  '- A bet is a chip stack or amount lying between a player and the middle: it belongs to the nearest player. The pot is the amount labelled as the pot (e.g. "Total pot", "Pot").',
+  '- A label or bubble over a player ("Fold", "Call 2", "Raise", "Raises to 15", "All-in") is that player\'s latest action. The player whose turn it is is highlighted (a glow, a timer bar, "To act", "Your turn").',
+  '- Logos, table text (game name, blinds), menus and buttons are not cards or bets.',
+  '- If you cannot tell whether a card is on the board or in a player\'s hand, leave it out and say so.',
+].join('\n');
+
 function prompt(player, betting) {
   const lines = [
     'You read playing cards in a photo of a poker table. It may be a real table or a screen showing a poker app; deck designs, colours and table layouts vary.',
@@ -102,6 +115,7 @@ function prompt(player, betting) {
     'Never guess. If you cannot read every card of the board with confidence, return the board empty; the same for hero. Say why in unsure.',
     'Never list a card twice.',
     'The picture may be sideways or upside down (a phone filmed lying on its side): read it as it should be, and say in rotate how far to turn it clockwise to make it upright.',
+    READING_GUIDE,
   ];
   if (betting) lines.push(
     'Also report betting for the current street. For every seat dealt in (the followed player too): its position (BTN, SB, BB, UTG, UTG+1, UTG+2, LJ, HJ, CO; shown on each player\'s badge, or work it out from the dealer button), whether it has folded, the chips it has put in on this street (the bet in front of it), and its latest action on this street.',
@@ -119,6 +133,7 @@ function tablePrompt(player) {
     'Amounts are numbers as shown, without currency symbols. If the blinds are printed on the table (e.g. "$0.50/$1"), report them.',
     'The picture may be sideways or upside down (a phone filmed lying on its side): read it as it should be, and say in rotate how far to turn it clockwise to make it upright.',
     'Be strict in readable: mark a part false unless you can read all of it clearly, and say why in problems. Use "" or -1 for any single value you cannot read. Never guess.',
+    READING_GUIDE,
   ].join('\n');
 }
 const TABLE_PLAYER = 'the player nearest the camera at the bottom centre (in the Hand Walkthrough app, the name plate "You")';
@@ -128,7 +143,9 @@ function livePrompt(player, seats) {
     `Seats in order: the followed player (${player}) first, then clockwise (on the picture: up the left side, across the top, down the right side)${seats ? `; there should be ${seats} seats` : ''}.`,
     'Per seat: the chips in front of it on this street, and whether it has folded. Then whose turn it is (highlighted seat, timer bar), the pot as shown, and the face-up cards (codes: rank then suit, e.g. Ah, Td).',
     'The picture may be sideways: read it upright and say in rotate how far to turn it clockwise.',
-    'Never guess: set ok or cards_ok to false if you cannot read that part clearly.',
+    'board: the face-up row in the middle by the pot (0, 3, 4 or 5 cards). hero: the two face-up cards beside the followed player\'s plate, never cards from the middle row. Card backs are nobody\'s board.',
+    'A bet is the chips or amount between a player and the middle, and belongs to the nearest player.',
+    'Never guess: set ok or cards_ok to false if you cannot read that part clearly, or cannot tell board cards from the player\'s.',
   ].join('\n');
 }
 // → the same shape as normalizeTable (seats carry only bet and folded; names, stacks and the dealer come from the full read)

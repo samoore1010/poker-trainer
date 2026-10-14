@@ -9,7 +9,8 @@
     "dev": "node --watch server/index.js",
     "test": "node --test",
     "check:openai": "node scripts/check-openai.js",
-    "bench": "node scripts/benchmark.js"
+    "bench": "node scripts/benchmark.js",
+    "layout": "node scripts/layout-check.js"
   },
   "engines": {
     "node": ">=20"

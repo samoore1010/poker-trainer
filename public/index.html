@@ -314,17 +314,24 @@
   @keyframes live { 50% { opacity: .35; box-shadow: 0 0 0 5px rgba(224,103,79,0); } }
   .cam-body { display: grid; gap: 8px; align-items: start; }
   /* the picture, upright, as large as the panel allows; tap it for full screen */
-  .cam-view { position: relative; background: #000; border-radius: 8px; overflow: hidden; height: clamp(160px, 30vh, 400px); cursor: zoom-in; }
+  .cam-view { --camh: clamp(160px, 30vh, 400px); position: relative; background: #000; border-radius: 8px; overflow: hidden; aspect-ratio: 16 / 9; width: 100%; max-height: var(--camh); cursor: zoom-in; }
   .cam-view canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   .cam-rot { position: absolute; right: 8px; bottom: 8px; width: 34px; height: 34px; padding: 0; border-radius: 50%; border: 0; background: rgba(0,0,0,.6); color: #fff; font-size: 1.1rem; }
   /* the camera's own video never shows (it keeps playing: a hidden video can be paused by phones, which would stop the reading) */
   .cam-src { position: absolute; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
   .cam-body.folded .cam-view { display: none; }
-  .cam-full { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.92); display: grid; place-items: center; }
+  /* a tall picture (a phone filmed on its side, or a crop around a phone's screen) gets a tall window, the readout beside it */
+  .cam-body.tall { grid-template-columns: auto minmax(0, 1fr); }
+  .cam-body.tall .cam-view { width: auto; height: var(--camh); max-height: none; max-width: 100%; }
+  /* the crop editor: the whole picture, the part that's read framed bright; drag, resize from a corner, pinch to zoom */
+  .cam-full { position: fixed; inset: 0; z-index: 60; background: #000; display: grid; grid-template-rows: 1fr auto; }
   .cam-full[hidden] { display: none; }
-  .cam-full canvas { width: 100vw; height: 100vh; }
+  .cam-full canvas { width: 100%; height: 100%; min-height: 0; touch-action: none; cursor: crosshair; }
   .cam-full .cp-x { position: absolute; top: 12px; right: 16px; font-size: 2rem; color: #fff; }
-  .cam-full .cam-rot { right: 20px; bottom: 20px; width: 48px; height: 48px; font-size: 1.5rem; }
+  .cam-full .cam-rot { position: static; width: 44px; height: 44px; font-size: 1.3rem; background: #333; }
+  .crop-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); background: #111; color: #ddd; }
+  .crop-bar .note { flex-basis: 100%; text-align: center; color: #aaa; margin: 0; font-size: .8rem; }
+  .crop-bar button { min-height: 40px; }
   .cam-live-row { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .76rem; }
   .cam-live-row .ok { color: var(--good); } .cam-live-row .no { color: var(--warn); }
   .cam-ai .lag { font-family: var(--mono); color: var(--fg); }
@@ -357,7 +364,7 @@
   .cam-btns { display: inline-flex; gap: 6px; margin-left: auto; }
   .cam-conflict b { font: 700 .82rem var(--body); letter-spacing: 0; text-transform: none; color: var(--fg); margin: 0; }
   .cam-btns button { padding: 3px 9px; font-size: .74rem; }
-  @media (max-width: 860px) { .cam-view { height: clamp(150px, 30vh, 320px); } .ctl .hint { flex-basis: 100%; order: -2; margin: 0; } .ctl #nextBtn { flex-basis: 100%; order: -1; padding: 10px; } .ctl > button { flex: 1 1 0; white-space: nowrap; } .prog { grid-template-columns: 1fr; } .playdock { order: -1; } .camdock { border-right: 0; border-top: 1px solid var(--line); } }
+  @media (max-width: 860px) { .cam-view { --camh: clamp(150px, 30vh, 320px); } .ctl .hint { flex-basis: 100%; order: -2; margin: 0; } .ctl #nextBtn { flex-basis: 100%; order: -1; padding: 10px; } .ctl > button { flex: 1 1 0; white-space: nowrap; } .prog { grid-template-columns: 1fr; } .playdock { order: -1; } .camdock { border-right: 0; border-top: 1px solid var(--line); } }
 
   /* Advisor */
   .advisor { background: var(--panel); border-left: 1px solid var(--line); display: grid; grid-template-rows: auto 1fr; min-height: 0; }
@@ -464,8 +471,15 @@
     .ask input { flex: 1 1 auto; min-width: 0; }
     .ask button { flex: none; padding-left: 12px; padding-right: 12px; }
     /* the table leaves room below it for your turn's buttons on the first screen */
-    .tablewrap { padding: 34px 2px 12px; }
-    .table { width: min(calc(100% - 28px), max(300px, calc((100svh - 330px) * .64))); }
+    /* the table leaves room below it for your turn's buttons on the first screen; you sit on the bottom rail */
+    .tablewrap { padding: 30px 2px 66px; }
+    .table { width: min(calc(100% - 44px), max(310px, calc((100svh - 300px) * .62))); aspect-ratio: .62; }
+    .seat .act { max-width: 96px; text-overflow: ellipsis; overflow: hidden; } .hero .act { max-width: 170px !important; }
+    .center { top: 46%; gap: 8px; }
+    .board { gap: 3px; } .board .card, .board .slot { width: 36px; height: 51px; }
+    .hero .cards { left: calc(100% + 9px); bottom: 4px; gap: 3px; }
+    .hero .cards .card:first-child { transform: rotate(-5deg); } .hero .cards .card + .card { transform: rotate(5deg) translateY(2px); }
+    .seat .cards .card.sm { width: 20px; height: 28px; }
   }
   /* a phone on its side: a wide table sized to the screen's height, everything else below it */
   @media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
@@ -540,7 +554,7 @@
             <div class="cam-ready" id="camReady"></div>
             <div class="cam-sync" id="camSyncBox" hidden></div>
             <div class="cam-body" id="camBody">
-              <div class="cam-view" id="camView" title="Tap to see it bigger"><canvas id="camPrev"></canvas><button type="button" class="cam-rot" id="camRot" title="Turn the picture a quarter turn (it also turns itself upright when the AI sees it sideways)" aria-label="Turn the picture">↻</button></div>
+              <div class="cam-view" id="camView" title="Tap to crop and zoom"><canvas id="camPrev"></canvas><button type="button" class="cam-rot" id="camRot" title="Turn the picture a quarter turn (it also turns itself upright when the AI sees it sideways)" aria-label="Turn the picture">↻</button></div>
               <div class="cam-info"><div class="cam-read" id="camRead"></div><p class="note" id="camNote">Starting the camera…</p></div>
             </div>
             <div class="cam-btnrow"><button type="button" class="cam-syncbtn" id="camSync" hidden title="One careful read of the whole table: players, names, stacks, the dealer, the betting and the cards. You see what would change before anything does.">⟳ Sync table</button><button type="button" class="ghost" id="camFold" aria-expanded="true">▴ Hide view</button><button type="button" class="ghost" id="camReread" title="Unlock the cards and read the table from scratch">Re-read</button><button type="button" class="ghost" id="camClose">■ Stop</button></div>
@@ -570,7 +584,8 @@
     </aside>
   </div>
 </div>
-<div class="cam-full" id="camFull" hidden role="dialog" aria-label="Camera picture"><canvas id="camFullCv"></canvas><button type="button" class="cp-x" id="camFullX" aria-label="Close">×</button><button type="button" class="cam-rot" id="camFullRot" aria-label="Turn the picture">↻</button></div>
+<div class="cam-full" id="camFull" hidden role="dialog" aria-label="Crop the camera picture"><canvas id="camFullCv"></canvas><button type="button" class="cp-x" id="camFullX" aria-label="Cancel">×</button>
+  <div class="crop-bar"><p class="note" id="cropNote">Frame the table: drag the box to move it, drag a corner to resize, pinch (or scroll) to zoom. Only the framed part is read.</p><button type="button" class="ghost" id="cropFit" title="Crop to the table the AI found">Fit to table</button><button type="button" class="ghost" id="cropAll">Show all</button><button type="button" class="cam-rot" id="camFullRot" aria-label="Turn the picture">↻</button><button type="button" class="primary" id="cropDone">Done</button></div></div>
 <div class="cardpick" id="cardpick" hidden role="dialog" aria-label="Choose a card"></div>
 <div class="cardpick seatpop" id="seatpop" hidden role="dialog" aria-label="Edit player"></div>
 <script src="engine.js"></script>
@@ -774,28 +789,44 @@
   const tallTable = () => narrow.matches && !sideways.matches;
   $('optsBtn').addEventListener('click', () => { const open = $('optsBtn').closest('.bar').classList.toggle('opts-open'); $('optsBtn').setAttribute('aria-expanded', open); });
   // Where each seat sits (percent of the table box): players line the rail of the stadium, you at the bottom centre.
-  // A squarish oval spreads them along the long sides, as at a real table; phones get a tall table.
+  // A squarish oval spreads them along the long sides, as at a real table. Phones get a tall table laid out in zones
+  // (as poker apps do): a clear band across the middle for the pot and the board, players above and below it on the
+  // rail, each bet just inside its player, and you on the rail at the bottom with your cards beside you, off the felt.
+  // Nothing overlaps, so the table reads at a glance, and the camera can tell the board from your cards.
+  const TALL = { // [seat x, seat y, bet x, bet y, dealer x, dealer y]
+    T: [50, 7, 50, 22, 50, 30], TL: [12, 12, 28, 26, 39, 23], TR: [88, 12, 72, 26, 61, 23],
+    TL3: [15, 9, 30, 25, 41, 30], TR3: [85, 9, 70, 25, 59, 30],
+    UL: [4, 35, 27, 35, 27, 43], UR: [96, 35, 73, 35, 73, 43], LL: [4, 70, 27, 70, 27, 62], LR: [96, 70, 73, 70, 73, 62],
+    BL: [5, 90, 30, 82, 12, 104],
+  };
+  const TALL_SLOTS = [null, ['T'], ['TL', 'TR'], ['LL', 'T', 'LR'], ['LL', 'TL', 'TR', 'LR'], ['LL', 'UL', 'T', 'UR', 'LR'],
+    ['LL', 'UL', 'TL', 'TR', 'UR', 'LR'], ['LL', 'UL', 'TL3', 'T', 'TR3', 'UR', 'LR'], ['BL', 'LL', 'UL', 'TL3', 'T', 'TR3', 'UR', 'LR']];
+  const tallSlot = seat => TALL[(TALL_SLOTS[hand.n] || TALL_SLOTS[8])[seat - 1]];
   function seatPos(seat) {
     const tall = tallTable();
-    if (seat === 0) return { x: 50, y: tall ? 87 : 85 };
-    const n = hand.n, i = seat - 1, gap = tall ? 84 : 64; // degrees kept clear at the bottom for you
-    const a = (90 + gap / 2 + (i + 0.5) * (360 - gap) / n) * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a), k = tall ? 0.55 : 0.7;
-    return { x: 50 + (tall ? 39 : 45) * Math.sign(c) * Math.abs(c) ** k, y: (tall ? 47 : 48) + (tall ? 41 : 42) * Math.sign(sn) * Math.abs(sn) ** k };
+    if (seat === 0) return { x: tall ? 46 : 50, y: tall ? 100 : 85 }; // on a phone a little left of centre: your cards sit to the right
+    if (tall) { const t = tallSlot(seat); return { x: t[0], y: t[1] }; }
+    const n = hand.n, i = seat - 1, gap = 64; // degrees kept clear at the bottom for you
+    const a = (90 + gap / 2 + (i + 0.5) * (360 - gap) / n) * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a), k = 0.7;
+    return { x: 50 + 45 * Math.sign(c) * Math.abs(c) ** k, y: 48 + 42 * Math.sign(sn) * Math.abs(sn) ** k };
   }
   // Where a seat's chips sit: between the player and the middle of the table.
   function betPos(seat) {
     const p = seatPos(seat);
-    if (seat === 0) return { x: 50, y: p.y - (tallTable() ? 17 : 16) };
-    const k = p.y > 55 ? (tallTable() ? 0.3 : 0.36) : tallTable() ? 0.4 : 0.46; // seats below the middle keep their chips clear of the board
+    if (tallTable()) { if (seat === 0) return { x: p.x, y: 82 }; const t = tallSlot(seat); return { x: t[2], y: t[3] }; }
+    if (seat === 0) return { x: 50, y: p.y - 16 };
+    const k = p.y > 55 ? 0.36 : 0.46; // seats below the middle keep their chips clear of the board
     return { x: p.x + (50 - p.x) * k, y: p.y + (47 - p.y) * k };
   }
   // The dealer button sits just inside the seat, off to one side so it doesn't cover the chips.
   function dealerPos(seat) {
     const p = seatPos(seat);
-    if (seat === 0) return { x: p.x - (tallTable() ? 20 : 11), y: p.y - (tallTable() ? 9 : 14) };
-    const dx = 50 - p.x, dy = 47 - p.y, d = Math.hypot(dx, dy) || 1, k = tallTable() ? 0.42 : 0.3;
+    if (tallTable()) { if (seat === 0) return { x: p.x - 22, y: 104 }; const t = tallSlot(seat); return { x: t[4], y: t[5] }; }
+    if (seat === 0) return { x: p.x - 11, y: p.y - 14 };
+    const dx = 50 - p.x, dy = 47 - p.y, d = Math.hypot(dx, dy) || 1, k = 0.3;
     return { x: p.x + dx * k - dy / d * 7, y: p.y + dy * k + dx / d * 7 };
   }
+  window.PokerLayout = { seatPos, betPos, dealerPos }; // for the layout checks (test/layout)
   const heroOut = () => hand.m.foldedAt[0] !== null; // once you fold, the hand is over for you
   const isLive = () => hand.m.frontier === step && step < 4 && !hand.m.ended && !heroOut() && hand.m.next !== null;
   // A seat's latest action on street s, for the label under the player.
@@ -868,7 +899,7 @@
       else { const x = seatAction(seat, step); act.className = 'act ' + (x.cls === 'blind' ? 'empty' : x.cls); act.textContent = x.text === 'Folded' ? 'Fold' : x.text; }
       s.appendChild(act);
       const pic = document.createElement('div'); pic.className = 'pic';
-      const cs = document.createElement('div'); cs.className = 'cards' + (p.x < 22 ? ' r' : ''); // tucked behind the avatar, on the side facing the table
+      const cs = document.createElement('div'); cs.className = 'cards' + ((tallTable() ? p.x > 50 : p.x < 22) ? ' r' : ''); // tucked behind the avatar: facing the table, or on a phone on the outer side, clear of the bets
       if ((step === 4 && !folded) || o.cards) h.opps[i].forEach((c, k) => { const el = cardEl(c, 'sm editable' + (o.cards ? ' known' : '')); el.dataset.slot = `opp:${seat}:${k}`; cs.appendChild(el); });
       else if (!folded) for (let k = 0; k < 2; k++) { const b = document.createElement('div'); b.className = 'card sm back editable'; b.dataset.slot = `opp:${seat}:${k}`; b.title = `Set ${o.name}'s cards`; cs.appendChild(b); }
       pic.appendChild(cs);
@@ -1290,16 +1321,34 @@
   const lockedHero = () => (cam.lock.hero ? scenario.hero.cards.slice() : null);
   const lockedBoard = () => scenario.board.slice(0, cam.lock.board.length);
   const unverified = () => cam.lock && (cam.lock.hero === 'fast' || cam.lock.board.includes('fast'));
+  // Two new cards for you mean a new hand, but a card next to the middle can be misread as yours (a board card taken
+  // for a hole card). So: while this hand is still being played, the new pair has to hold, with no board showing, for
+  // a second and a half before the table moves on. Once the hand is over, it moves on at once.
   function isNewHand(r) {
     if (!r.hero) return false;
     const h = lockedHero(), b = lockedBoard();
-    if (h && r.hero.every(c => !h.includes(c))) return true; // two new cards
-    return b.length > 0 && !!r.board && r.board.length === 0 && !sameCards(r.hero, h); // the board was cleared
+    const fresh = h && r.hero.every(c => !h.includes(c)), cleared = b.length > 0 && !!r.board && r.board.length === 0 && !sameCards(r.hero, h);
+    if (!fresh && !cleared) return false; // (a reading of the old hand still on its way doesn't cancel a new pair)
+    const m = hand.m, playing = !m.ended && m.foldedAt[0] === null && m.frontier < 4;
+    if (!playing) return true;
+    if (r.board && r.board.length) return false; // a board is showing: not the start of a hand
+    const key = r.hero.slice().sort().join(), now = Date.now(), np = cam.newPair;
+    if (!np || np.key !== key || now - np.seen > 1200) cam.newPair = { key, since: now };
+    cam.newPair.seen = now;
+    return now - cam.newPair.since >= 1500;
+  }
+  // A card can't be in two places: one read as yours while it lies on the board (in this reading or on the table) is a
+  // misreading, and the reading's hand is dropped.
+  function sanePair(r) {
+    if (!r.hero) return r;
+    if (r.board && !r.board.length) return r; // the board was cleared: a new hand, and any card may come round again
+    const onBoard = new Set([...(r.board || []), ...lockedBoard()]);
+    return r.hero.some(c => onBoard.has(c)) ? { ...r, hero: null } : r;
   }
   // What a reading would do: fill what isn't on the table yet, confirm what matches, let the AI correct cards that
   // only the fast reading put there; anything else that disagrees is a conflict for you to settle.
   function planFor(r, ai) {
-    syncLock();
+    syncLock(); r = sanePair(r);
     const p = { newHand: isNewHand(r), hero: null, board: null, conflict: null, fixes: [], confirmHero: false, confirmBoard: [] };
     const h = p.newHand ? null : lockedHero(), b = p.newHand ? [] : lockedBoard(), src = p.newHand ? [] : cam.lock.board;
     if (r.hero) {
@@ -1446,7 +1495,7 @@
     return c.toDataURL('image/jpeg', kind === 'short' ? 0.75 : 0.85);
   }
   async function askLive(kind) {
-    const L = cam.live, seq = ++L.seq, t0 = Date.now();
+    const L = cam.live, seq = ++L.seq, t0 = Date.now(), ver = cam.cropVer || 0;
     L.inflight++; L.lastSent = t0; cam.asked = cam.thumbNow; cam.needCheck = false;
     if (kind === 'full') L.fullBusy = true;
     try {
@@ -1456,7 +1505,7 @@
       const ms = Date.now() - t0;
       if (kind === 'short') L.ms = L.ms ? L.ms * 0.7 + ms * 0.3 : ms; else L.fullMs = L.fullMs ? L.fullMs * 0.7 + ms * 0.3 : ms;
       if (!cam.stream) return;
-      if (kind === 'full') { L.fullAt = Date.now(); L.fullHand = hand.deal; if (T.box) L.box = T.box; if (T.readable.seats) followSeats(T, L.inSync); L.seatMiss = 0; }
+      if (kind === 'full') { L.fullAt = Date.now(); L.fullHand = hand.deal; if (T.readable.seats) followSeats(T, L.inSync); L.seatMiss = 0; if (ver === (cam.cropVer || 0)) { if (T.box) L.box = T.box; noteTableBox(T); } } // (a box found in the picture before a new crop is stale)
       if (seq < L.applied) return; // a newer reading has already been applied: its betting and cards are fresher
       L.applied = seq; L.at = Date.now(); L.reads++;
       applyLive(T, t0);
@@ -1557,7 +1606,7 @@
     if (q) camNote(`Reading the whole table…${q}`); $('camSync').disabled = true;
     try {
       const T = await HV.api.request('/api/cards/table', { body: JSON.stringify({ image: frameJpeg(0.9) }), headers: { 'Content-Type': 'application/json' } });
-      cam.ai.calls++; cam.sync = T;
+      cam.ai.calls++; cam.sync = T; if (T.box && cam.live) cam.live.box = T.box; // for Fit to table
       if (!T.readable.seats) { cam.synced = false; cam.syncMsg = { err: true, text: `The camera couldn't read the seats clearly, so everything stays manual${T.problems.length ? `: ${T.problems.join('; ')}` : ''}. Move closer or straighten the camera, then sync again.` }; return; }
       const items = SC.syncPlan(scenario, T);
       if (!items.length) { cam.synced = true; cam.syncMsg = { text: 'The table already matches the camera.' }; afterSync(T); return; }
@@ -1655,19 +1704,28 @@
     if (!cam.stream) return;
     const v = $('camVideo'), t0 = performance.now();
     if (v.videoWidth && !document.hidden) {
-      // every frame is turned upright first (cam.rot), so the phone's reader, the AI and the preview all see it upright
-      const k = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight)), sw = Math.round(v.videoWidth * k), sh = Math.round(v.videoHeight * k);
-      const side = cam.rot % 180 !== 0, W = side ? sh : sw, H = side ? sw : sh;
+      // every frame is turned upright first (cam.rot) and cut to the crop (cam.crop, fractions of the upright picture),
+      // so the phone's reader, the AI and the preview all see the same upright, framed picture; the crop is drawn from
+      // the camera's full resolution, so zooming in keeps the detail
+      const vw = v.videoWidth, vh = v.videoHeight, side = cam.rot % 180 !== 0, UW = side ? vh : vw, UH = side ? vw : vh;
+      const cr = cam.crop || FULL_CROP, cx = cr.x * UW, cy = cr.y * UH, cw = cr.w * UW, ch = cr.h * UH;
+      const k = Math.min(1, 1280 / Math.max(cw, ch)), W = Math.max(16, Math.round(cw * k)), H = Math.max(16, Math.round(ch * k));
       const c = cam.canvas || (cam.canvas = document.createElement('canvas'));
-      if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+      if (c.width !== W || c.height !== H) { c.width = W; c.height = H; fitCamView(W, H); }
       const g = c.getContext('2d', { willReadFrequently: true });
-      g.save(); g.translate(W / 2, H / 2); g.rotate(cam.rot * Math.PI / 180); g.drawImage(v, -sw / 2, -sh / 2, sw, sh); g.restore();
+      const upright = (gg, kk, dx, dy) => { gg.setTransform(kk, 0, 0, kk, -dx * kk, -dy * kk); gg.translate(UW / 2, UH / 2); gg.rotate(cam.rot * Math.PI / 180); gg.drawImage(v, -vw / 2, -vh / 2, vw, vh); gg.setTransform(1, 0, 0, 1, 0, 0); };
+      upright(g, k, cx, cy);
+      if (!$('camFull').hidden) { // the crop editor shows the whole picture
+        const kf = Math.min(1, 1280 / Math.max(UW, UH)), f = cam.fullCv || (cam.fullCv = document.createElement('canvas'));
+        if (f.width !== Math.round(UW * kf) || f.height !== Math.round(UH * kf)) { f.width = Math.round(UW * kf); f.height = Math.round(UH * kf); }
+        upright(f.getContext('2d'), kf, 0, 0);
+      }
       const px = g.getImageData(0, 0, W, H).data;
       let r = null; try { r = CardVision.analyze(px, W, H, { fourColor: cam.four }); } catch (e) { console.warn(e); }
       if (r && r.fourColor && !cam.four) cam.four = true; // the screen being filmed uses a four-colour deck: suits are read by colour
       cam.last = r;
       drawPreview($('camPrev'), r);
-      if (!$('camFull').hidden) drawPreview($('camFullCv'), r);
+      if (!$('camFull').hidden) drawCropEditor();
       if (r) onFrame(r, updateThumb(px, W, H));
       if (Date.now() - cam.qAt > 1000) { cam.qAt = Date.now(); cam.quality = pictureCheck(px, W, H, r); }
     }
@@ -1759,13 +1817,136 @@
   }
   // Which way up: turned automatically when the AI sees it sideways, or by hand with ↻. Remembered on this device.
   cam.rot = [0, 90, 180, 270].includes(store.get('walkthrough.camRot')) ? store.get('walkthrough.camRot') : 0;
-  function setRot(r) { cam.rot = r; store.set('walkthrough.camRot', r); cam.prevThumb = null; cam.asked = null; cam.seen = []; cam.localKey = ''; if (cam.live) { cam.live.box = null; cam.live.fullAt = 0; } }
+  function setRot(r) {
+    cam.rot = r; store.set('walkthrough.camRot', r); cam.prevThumb = null; cam.asked = null; cam.seen = []; cam.localKey = ''; if (cam.live) { cam.live.box = null; cam.live.fullAt = 0; }
+    if (cam.crop) { setCrop(null, 'reset'); cam.wantFit = true; } // a crop belongs to one way up
+    if (ed.crop) ed.crop = { ...FULL_CROP };
+  }
   const turn = e => { e.stopPropagation(); setRot((cam.rot + 90) % 360); camNote(`Turned the picture a quarter turn.`); };
   $('camRot').addEventListener('click', turn);
   $('camFullRot').addEventListener('click', turn);
-  $('camView').addEventListener('click', () => { $('camFull').hidden = false; drawPreview($('camFullCv'), cam.last); });
-  $('camFullX').addEventListener('click', () => { $('camFull').hidden = true; });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('camFull').hidden) $('camFull').hidden = true; });
+
+  // ----- the crop: read only the table -----
+  // A rectangle of the upright picture (fractions); null = all of it. Set by hand in the editor, or fitted to the table
+  // the AI finds (the first time it finds it, and whenever you press Fit). If the table goes missing from a crop, the
+  // picture widens back out and fits again on the next reading that finds it. Remembered on this device, per rotation.
+  const FULL_CROP = { x: 0, y: 0, w: 1, h: 1 };
+  const clampCrop = c => {
+    const w = Math.max(0.08, Math.min(1, c.w)), h = Math.max(0.08, Math.min(1, c.h));
+    return { x: Math.max(0, Math.min(1 - w, c.x)), y: Math.max(0, Math.min(1 - h, c.y)), w, h };
+  };
+  const isFull = c => !c || (c.w > 0.97 && c.h > 0.97);
+  { const st = store.get('walkthrough.camCrop'); cam.crop = st && st.rot === cam.rot && !isFull(st) ? clampCrop(st) : null; cam.cropAuto = !st || !!(st && st.auto); }
+  function setCrop(c, how) { // how: 'auto' (fitted to the table), 'hand', or 'reset'
+    cam.crop = isFull(c) ? null : clampCrop(c);
+    if (how !== 'reset') cam.cropAuto = how === 'auto';
+    store.set('walkthrough.camCrop', cam.crop ? { ...cam.crop, rot: cam.rot, auto: cam.cropAuto } : { rot: cam.rot, auto: cam.cropAuto });
+    cam.prevThumb = null; cam.asked = null; cam.seen = []; cam.localKey = ''; cam.lostTable = 0; cam.cropVer = (cam.cropVer || 0) + 1;
+    if (cam.live) { cam.live.box = null; cam.live.fullAt = 0; } // the next full reading finds the table in the new picture
+    cameraResolution();
+  }
+  // A tight crop asks the camera for its highest resolution, so the framed part stays sharp.
+  function cameraResolution() {
+    const t = cam.stream && cam.stream.getVideoTracks()[0]; if (!t || !t.applyConstraints) return;
+    const big = cam.crop && cam.crop.w * cam.crop.h < 0.6;
+    t.applyConstraints(big ? { width: { ideal: 3840 }, height: { ideal: 2160 } } : { width: { ideal: 1920 }, height: { ideal: 1080 } }).catch(() => {});
+  }
+  // The crop that frames the table the AI found (box: fractions of the current picture), with a little margin.
+  function tableCrop(box) {
+    const c = cam.crop || FULL_CROP, m = 0.03;
+    return clampCrop({ x: c.x + (box[0] - m) * c.w, y: c.y + (box[1] - m) * c.h, w: (box[2] - box[0] + 2 * m) * c.w, h: (box[3] - box[1] + 2 * m) * c.h });
+  }
+  // after each full reading: fit to the table the first time it's found; widen back out when a crop has lost it
+  function noteTableBox(T) {
+    if (T.box) {
+      cam.lostTable = 0;
+      const area = (T.box[2] - T.box[0]) * (T.box[3] - T.box[1]);
+      if ((cam.wantFit || (!cam.crop && cam.cropAuto)) && area < 0.8) { cam.wantFit = false; setCrop(tableCrop(T.box), 'auto'); camNote('Cropped the picture to the table: tap it to adjust.'); }
+      else cam.wantFit = false;
+    } else if (cam.crop && !T.readable.seats && ++cam.lostTable >= 2) {
+      setCrop(null, 'reset'); cam.wantFit = true; camNote('The table went out of the crop: showing the whole picture, and cropping again once the table is found.', true);
+    }
+  }
+  // the window takes the picture's shape: a tall picture gets a tall window with the readout beside it
+  function fitCamView(W, H) {
+    $('camView').style.aspectRatio = `${W} / ${H}`;
+    $('camBody').classList.toggle('tall', H > W * 1.1);
+  }
+
+  // the editor
+  const ed = { crop: null, ptrs: new Map(), mode: null, start: null, view: null };
+  function openCropEditor() {
+    if (!cam.stream) return;
+    ed.crop = { ...(cam.crop || FULL_CROP) }; $('camFull').hidden = false;
+    $('cropFit').disabled = !(cam.live && cam.live.box);
+    $('cropFit').title = cam.live && cam.live.box ? 'Crop to the table the AI found' : 'Waits for the AI to find the table (turn on "Follow the table live" or press Sync table)';
+  }
+  const closeCropEditor = () => { $('camFull').hidden = true; ed.ptrs.clear(); ed.mode = null; };
+  function drawCropEditor() {
+    const cv = $('camFullCv'), f = cam.fullCv; if (!f || !ed.crop) return;
+    const box = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    const w = Math.round(box.width * dpr), h = Math.round(box.height * dpr); if (!w || !h) return;
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    const g = cv.getContext('2d'), pad = 24 * dpr;
+    const sc = Math.min((w - 2 * pad) / f.width, (h - 2 * pad) / f.height), ox = (w - f.width * sc) / 2, oy = (h - f.height * sc) / 2, fw = f.width * sc, fh = f.height * sc;
+    ed.view = { ox: ox / dpr, oy: oy / dpr, fw: fw / dpr, fh: fh / dpr, left: box.left, top: box.top };
+    g.fillStyle = '#000'; g.fillRect(0, 0, w, h); g.drawImage(f, ox, oy, fw, fh);
+    const c = ed.crop, rx = ox + c.x * fw, ry = oy + c.y * fh, rw = c.w * fw, rh = c.h * fh;
+    g.fillStyle = 'rgba(0,0,0,.6)';
+    g.fillRect(ox, oy, fw, ry - oy); g.fillRect(ox, ry + rh, fw, oy + fh - ry - rh); g.fillRect(ox, ry, rx - ox, rh); g.fillRect(rx + rw, ry, ox + fw - rx - rw, rh);
+    g.strokeStyle = '#ffd36a'; g.lineWidth = 2 * dpr; g.strokeRect(rx, ry, rw, rh);
+    g.fillStyle = '#ffd36a';
+    for (const [x, y] of [[rx, ry], [rx + rw, ry], [rx, ry + rh], [rx + rw, ry + rh]]) { g.beginPath(); g.arc(x, y, 8 * dpr, 0, Math.PI * 2); g.fill(); }
+  }
+  // pointer position → fractions of the whole picture
+  const edPoint = e => { const v = ed.view; return { x: (e.clientX - v.left - v.ox) / v.fw, y: (e.clientY - v.top - v.oy) / v.fh }; };
+  function edZoom(f, at) { // f < 1 zooms in (a smaller crop), around the point `at`
+    const c = ed.crop, w = Math.min(1, c.w * f), h = Math.min(1, c.h * f);
+    ed.crop = clampCrop({ x: at.x - (at.x - c.x) * (w / c.w), y: at.y - (at.y - c.y) * (h / c.h), w, h });
+  }
+  $('camFullCv').addEventListener('pointerdown', e => {
+    if (!ed.view) return;
+    $('camFullCv').setPointerCapture(e.pointerId); ed.ptrs.set(e.pointerId, edPoint(e));
+    const c = { ...ed.crop };
+    if (ed.ptrs.size === 2) { const [a, b] = [...ed.ptrs.values()]; ed.mode = 'pinch'; ed.start = { c, d: Math.hypot((a.x - b.x) * ed.view.fw, (a.y - b.y) * ed.view.fh), mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } }; return; }
+    const p = edPoint(e), near = (x, y) => Math.hypot((p.x - x) * ed.view.fw, (p.y - y) * ed.view.fh) < 28;
+    const corners = [[c.x, c.y], [c.x + c.w, c.y], [c.x, c.y + c.h], [c.x + c.w, c.y + c.h]], i = corners.findIndex(([x, y]) => near(x, y));
+    if (i >= 0) ed.mode = 'corner' + i;
+    else if (p.x > c.x && p.x < c.x + c.w && p.y > c.y && p.y < c.y + c.h) ed.mode = 'move';
+    else ed.mode = 'new';
+    ed.start = { c, p };
+  });
+  $('camFullCv').addEventListener('pointermove', e => {
+    if (!ed.ptrs.has(e.pointerId) || !ed.mode) return;
+    ed.ptrs.set(e.pointerId, edPoint(e));
+    const S = ed.start, p = edPoint(e);
+    if (ed.mode === 'pinch' && ed.ptrs.size === 2) {
+      const [a, b] = [...ed.ptrs.values()], d = Math.hypot((a.x - b.x) * ed.view.fw, (a.y - b.y) * ed.view.fh);
+      ed.crop = { ...S.c }; edZoom(S.d / Math.max(10, d), S.mid);
+    } else if (ed.mode === 'move') ed.crop = clampCrop({ ...S.c, x: S.c.x + p.x - S.p.x, y: S.c.y + p.y - S.p.y });
+    else if (ed.mode === 'new') {
+      const x0 = Math.max(0, Math.min(1, S.p.x)), y0 = Math.max(0, Math.min(1, S.p.y)), x1 = Math.max(0, Math.min(1, p.x)), y1 = Math.max(0, Math.min(1, p.y));
+      if (Math.abs(x1 - x0) > 0.04 && Math.abs(y1 - y0) > 0.04) ed.crop = clampCrop({ x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) });
+    } else if (ed.mode.startsWith('corner')) {
+      const i = +ed.mode.slice(6), c = S.c, px = Math.max(0, Math.min(1, p.x)), py = Math.max(0, Math.min(1, p.y));
+      const fx = i % 2 ? c.x : c.x + c.w, fy = i < 2 ? c.y + c.h : c.y; // the opposite corner stays put
+      ed.crop = clampCrop({ x: Math.min(fx, px), y: Math.min(fy, py), w: Math.abs(px - fx), h: Math.abs(py - fy) });
+    }
+    drawCropEditor();
+  });
+  const edUp = e => { ed.ptrs.delete(e.pointerId); if (ed.ptrs.size < 2 && ed.mode === 'pinch') ed.mode = null; if (!ed.ptrs.size) ed.mode = null; };
+  $('camFullCv').addEventListener('pointerup', edUp); $('camFullCv').addEventListener('pointercancel', edUp);
+  $('camFullCv').addEventListener('wheel', e => { if (!ed.view) return; e.preventDefault(); edZoom(e.deltaY > 0 ? 1.1 : 1 / 1.1, edPoint(e)); drawCropEditor(); }, { passive: false });
+  $('cropFit').addEventListener('click', () => { if (cam.live && cam.live.box) { ed.crop = tableCrop(cam.live.box); drawCropEditor(); } });
+  $('cropAll').addEventListener('click', () => { ed.crop = { ...FULL_CROP }; drawCropEditor(); });
+  $('cropDone').addEventListener('click', () => {
+    const was = cam.crop || FULL_CROP, c = ed.crop, same = ['x', 'y', 'w', 'h'].every(k => Math.abs(was[k] - c[k]) < 0.005);
+    if (!same) { setCrop(c, 'hand'); camNote(isFull(c) ? 'Showing the whole picture.' : 'Cropped: only the framed part is read.'); }
+    closeCropEditor();
+  });
+  $('camView').addEventListener('click', openCropEditor);
+  $('camFullX').addEventListener('click', closeCropEditor);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('camFull').hidden) closeCropEditor(); });
   $('camBtn').addEventListener('click', () => (cam.stream ? stopCamera() : startCamera()));
   $('camClose').addEventListener('click', stopCamera);
   // Hide or show the camera's picture; the reading carries on either way.
