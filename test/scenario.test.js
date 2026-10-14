@@ -400,3 +400,41 @@ test('set_pot: the pot on camera wins over the table\'s own sum, and later bets 
   assert.deepEqual(S.normalize(JSON.parse(JSON.stringify(sc))).scenario.potFix, sc.potFix); // kept when saved
   S.apply(sc, 'new_hand', {}); assert.equal(S.money(sc).potShow[0], 3); // a new hand starts clean
 });
+
+test('stats: what the camera saw counts, what was filled in to close a gap does not', () => {
+  const sc = S.create({ opponents: 3, stack: 200, randomStacks: false });
+  S.apply(sc, 'setup_table', { hero_position: 'BB' });
+  const pos = S.positions(sc), at = p => pos.indexOf(p);
+  const seat = (o = {}) => ({ name: '', stack: 190, dealer: false, folded: false, bet: 0, last: 'none', ...o });
+  // the camera sees UTG raise to 6, the button to act
+  const pre = { unit: 'chips', pot: 9, toAct: at('BTN'), seats: pos.map(p => seat(p === 'UTG' ? { bet: 6, last: 'raise' } : p === 'SB' ? { bet: 1 } : p === 'BB' ? { bet: 2 } : {})) };
+  const r1 = S.trackTable(sc, pre, 0); assert.ok(r1.ok, r1.error);
+  // next it sees the flop, with everyone still in: the button's, SB's and your calls were never seen
+  const flop = { unit: 'chips', pot: 24, toAct: at('SB'), seats: pos.map(() => seat()) };
+  const r2 = S.trackTable(r1.sc, flop, 1); assert.ok(r2.ok, r2.error);
+  const hs = S.handStats(r2.sc);
+  const name = p => r2.sc.opponents[at(p) - 1].name.toLowerCase();
+  assert.deepEqual([hs[name('UTG')].vpip, hs[name('UTG')].pfr], [1, 1]); // seen: counts
+  assert.equal(hs[name('BTN')], undefined); // only a filled-in call: not counted at all
+  assert.equal(hs[name('SB')], undefined);
+});
+
+test('reading memory: one-off misreads are ignored, swept chips are remembered, folds take a majority', () => {
+  const seat = (bet, folded = false) => ({ name: '', stack: 100, dealer: false, folded, bet, last: 'none' });
+  const T = (bets, folds = []) => ({ unit: 'chips', pot: 0, toAct: null, seats: bets.map((b, i) => seat(b, !!folds[i])) });
+  let mem = null;
+  const read = (t, street = 'h1:0') => { const r = S.smoothReading(mem, t, street, 'h1'); mem = r.mem; return r.T.seats; };
+  read(T([2, 1, 0])); read(T([2, 1, 0]));
+  assert.deepEqual(read(T([2, 1, 60])).map(x => x.bet), [2, 1, 0]); // one reading of 60: ignored
+  assert.deepEqual(read(T([2, 1, 6])).map(x => x.bet), [2, 1, 0]);
+  assert.deepEqual(read(T([2, 1, 6])).map(x => x.bet), [2, 1, 6]); // twice: it's real
+  read(T([0, 0, 0]));
+  assert.deepEqual(read(T([0, 0, 0])).map(x => x.bet), [2, 1, 6]); // swept into the pot: the bets are remembered
+  assert.deepEqual(read(T([0, 0, 0], []), 'h1:1').map(x => x.bet), [0, 0, 0]); // the next street starts clean
+  // folds: one reading doesn't fold a player, a majority does; and one reading doesn't bring them back
+  read(T([0, 0, 0], [0, 1, 0]), 'h1:1');
+  assert.equal(read(T([0, 0, 0]), 'h1:1')[1].folded, false);
+  read(T([0, 0, 0], [0, 1, 0]), 'h1:1'); read(T([0, 0, 0], [0, 1, 0]), 'h1:1');
+  assert.equal(read(T([0, 0, 0], [0, 1, 0]), 'h1:1')[1].folded, true);
+  assert.equal(read(T([0, 0, 0]), 'h1:1')[1].folded, true);
+});
