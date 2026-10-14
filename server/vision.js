@@ -213,6 +213,14 @@ function normalizeBetting(b, unsure) {
   return { players: n, heroPosition: b.hero_position, toAct: b.to_act === 'none' ? null : b.to_act, unit: b.unit === 'big blinds' ? 'bb' : 'chips', seats };
 }
 
+// The JSON object in a reply: as is, or the outermost {...} when something surrounds it (a code fence, a sentence).
+function parseJson(text) {
+  try { return JSON.parse(text); } catch (e) { /* fall through */ }
+  const a = text.indexOf('{'), b = text.lastIndexOf('}');
+  if (a < 0 || b <= a) return null;
+  try { return JSON.parse(text.slice(a, b + 1)); } catch (e) { return null; }
+}
+
 function createVision(config, openai) {
   const v = config.vision || {}, a = config.agent || {};
   const provider = v.provider || (a.anthropicKey ? 'anthropic' : openai.configured ? 'openai' : '');
@@ -226,15 +234,18 @@ function createVision(config, openai) {
         return ask({ data, mime, model, system: prompt(player || DEFAULT_PLAYER, betting), schema: betting ? BETTING_SCHEMA : SCHEMA, text: 'Read the board and the player\'s cards.', effort: 'low' });
       },
       readTable({ data, mime, player, fast }) {
-        return ask({ data, mime, model: fast ? liveModel : syncModel, system: tablePrompt(player || TABLE_PLAYER), schema: TABLE_SCHEMA, text: 'Read the whole table, seat by seat.', effort: fast ? 'low' : 'medium' });
+        return ask({ data, mime, model: fast ? liveModel : syncModel, system: tablePrompt(player || TABLE_PLAYER), schema: TABLE_SCHEMA, text: 'Read the whole table, seat by seat.', effort: fast ? 'low' : 'medium', quick: fast });
       },
       readLive({ data, mime, player, seats }) {
-        return ask({ data, mime, model: liveModel, system: livePrompt(player || TABLE_PLAYER, seats), schema: LIVE_SCHEMA, text: 'Bets, folds, whose turn, pot, cards.', effort: 'low', maxTokens: 800 });
+        return ask({ data, mime, model: liveModel, system: livePrompt(player || TABLE_PLAYER, seats), schema: LIVE_SCHEMA, text: 'Bets, folds, whose turn, pot, cards.', effort: 'low', quick: true });
       },
     };
-    async function ask({ data, mime, model, system, schema, text, effort, maxTokens }) {
+    // Thinking counts against max_tokens: a tight cap ends the answer before the JSON is written. Live reads turn
+    // thinking off where the model allows it (Haiku), for speed; everything else keeps a wide cap.
+    async function ask({ data, mime, model, system, schema, text, effort, quick }) {
       const params = {
-        model, max_tokens: maxTokens || 6000, system,
+        model, max_tokens: quick ? 4000 : 16000, system,
+        ...(quick && /haiku/.test(model) ? { thinking: { type: 'disabled' } } : {}),
         messages: [{ role: 'user', content: [
           { type: 'image', source: { type: 'base64', media_type: mime, data } },
           { type: 'text', text },
@@ -255,7 +266,11 @@ function createVision(config, openai) {
       }
       if (msg.stop_reason === 'refusal') throw new HttpError(502, 'llm_refused', 'The model declined to read this picture.');
       const out = msg.content.filter(b => b.type === 'text').map(b => b.text).join('');
-      try { return JSON.parse(out); } catch (e) { throw new HttpError(502, 'llm_bad_json', 'The model returned malformed JSON.'); }
+      const json = parseJson(out);
+      if (json) return json;
+      console.warn(JSON.stringify({ vision: 'bad_json', model, stop: msg.stop_reason, usage: msg.usage, text: out.slice(0, 300) }));
+      if (msg.stop_reason === 'max_tokens') throw new HttpError(502, 'llm_truncated', 'The model ran out of room before finishing its answer.');
+      throw new HttpError(502, 'llm_bad_json', `The model returned malformed JSON (stop: ${msg.stop_reason}).`);
     }
   }
   if (provider === 'openai' && openai.configured) {
@@ -277,10 +292,12 @@ function createVision(config, openai) {
       });
       const text = typeof res.output_text === 'string' && res.output_text ? res.output_text
         : (res.output || []).filter(o => o.type === 'message').flatMap(o => o.content || []).filter(c => c.type === 'output_text').map(c => c.text).join('');
-      try { return JSON.parse(text); } catch (e) { throw new HttpError(502, 'openai_bad_json', 'OpenAI returned malformed JSON.'); }
+      const json = parseJson(text);
+      if (json) return json;
+      throw new HttpError(502, 'openai_bad_json', 'OpenAI returned malformed JSON.');
     }
   }
   return null;
 }
 
-module.exports = { createVision, normalize, normalizeTable, normalizeLive, CODES, SCHEMA, BETTING_SCHEMA, TABLE_SCHEMA, LIVE_SCHEMA, POSITIONS };
+module.exports = { createVision, parseJson, normalize, normalizeTable, normalizeLive, CODES, SCHEMA, BETTING_SCHEMA, TABLE_SCHEMA, LIVE_SCHEMA, POSITIONS };

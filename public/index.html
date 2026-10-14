@@ -1351,10 +1351,16 @@
       decide(A, 'ai');
     } catch (e) { aiFailed(e); } finally { cam.ai.busy = false; renderCamRead(); }
   }
+  // A failed AI reading never holds up the camera's own: after two failures in a row the AI rests (15 s, then longer
+  // each time, up to 2 min; a setup problem like a bad key rests it 5 min) and the camera reads alone meanwhile.
   function aiFailed(e) {
     cam.ai.fails++;
-    if (e.status === 503 || cam.ai.fails >= 3) cam.ai.offUntil = Date.now() + 15000; // the fast reading carries on alone for a while
-    camNote(`AI read failed (${e.message}). The camera's own reading carries on.`, true);
+    const setup = ['llm_auth', 'llm_model', 'llm_error', 'vision_not_configured'].includes(e.code) || e.status === 401 || e.status === 403;
+    let rest = 0;
+    if (setup) rest = 300000;
+    else if (e.status === 503 || e.status === 429 || cam.ai.fails >= 2) rest = Math.min(120000, 15000 * 2 ** Math.max(0, cam.ai.fails - 2));
+    if (rest) cam.ai.offUntil = Date.now() + rest;
+    camNote(`AI reading failed: ${e.message || 'no answer'}${rest ? ` Using the camera alone for ${Math.round(rest / 1000)} s, then trying the AI again.` : ' Trying again; the camera keeps reading meanwhile.'}`, true);
   }
   // The AI says the picture is sideways or upside down: two readings in a row agreeing turn every frame upright.
   function noteRotation(r) {
