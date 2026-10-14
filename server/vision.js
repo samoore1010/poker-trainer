@@ -99,6 +99,8 @@ const READING_GUIDE = [
   '- The board (community cards) is one row of face-up cards near the middle of the table, usually next to the pot. It has 0, 3, 4 or 5 cards, never 1 or 2, and it belongs to no player.',
   '- A player\'s own cards lie beside that player\'s avatar or name plate, not in the middle row. The followed player\'s two cards are often larger, tilted, or set off the felt at the bottom edge next to their plate. Cards beside a player belong to that player, even if they are near the middle.',
   '- Face-down cards (card backs) beside an avatar are that player\'s hidden cards: never board cards.',
+  '- Folded: decide it from the seat\'s own label first. A seat marked "Folded" or "Fold" (in the Hand Walkthrough app the word FOLDED sits between the avatar and the name plate, and the seat is dimmed) has folded. Without such a label, a greyed-out seat with no cards has folded. A player with a bet, cards or an action label like "Call" or "Check" is still in.',
+  '- Amounts: read the figures printed on the table (the pot, each stack, each bet) exactly as shown; never add bets up to work out the pot.',
   '- A bet is a chip stack or amount lying between a player and the middle: it belongs to the nearest player. The pot is the amount labelled as the pot (e.g. "Total pot", "Pot").',
   '- A label or bubble over a player ("Fold", "Call 2", "Raise", "Raises to 15", "All-in") is that player\'s latest action. The player whose turn it is is highlighted (a glow, a timer bar, "To act", "Your turn").',
   '- Logos, table text (game name, blinds), menus and buttons are not cards or bets.',
@@ -144,7 +146,8 @@ function livePrompt(player, seats, cards = true) {
     `Per seat: the chips in front of it on this street, and whether it has folded. Then whose turn it is (highlighted seat, timer bar)${cards ? ', the pot as shown, and the face-up cards (codes: rank then suit, e.g. Ah, Td)' : ' and the pot as shown. Leave board and hero empty and cards_ok false: the cards are read elsewhere'}.`,
     'The picture may be sideways: read it upright and say in rotate how far to turn it clockwise.',
     ...(cards ? ['board: the face-up row in the middle by the pot (0, 3, 4 or 5 cards). hero: the two face-up cards beside the followed player\'s plate, never cards from the middle row. Card backs are nobody\'s board.'] : []),
-    'A bet is the chips or amount between a player and the middle, and belongs to the nearest player.',
+    'A bet is the chips or amount between a player and the middle, and belongs to the nearest player. The pot is the figure printed as the pot: read it, never add it up.',
+    'Folded: a seat labelled "Folded" or "Fold" (in the Hand Walkthrough app the word FOLDED sits between the avatar and the name, the seat dimmed) has folded; that label decides it.',
     'Never guess: set ok or cards_ok to false if you cannot read that part clearly, or cannot tell board cards from the player\'s.',
   ].join('\n');
 }

@@ -388,3 +388,15 @@ test('bring back: a fold is taken back and the hand goes on', () => {
   assert.equal(m2.next, at2('UTG')); // and now faces your flop bet
   assert.equal(S.apply(sc2, 'bring_back', { seat: at2('UTG') }).ok, false); // not folded any more
 });
+
+test('set_pot: the pot on camera wins over the table\'s own sum, and later bets add to it', () => {
+  const sc = S.create({ opponents: 3, stack: 200, randomStacks: false });
+  assert.equal(S.money(sc).potShow[0], 3);
+  assert.ok(S.apply(sc, 'set_pot', { pot: 12 }).ok);
+  assert.equal(S.money(sc).potShow[0], 12);
+  S.apply(sc, 'act', { seat: S.money(sc).next, action: 'call' });
+  assert.equal(S.money(sc).potShow[0], 14);
+  assert.equal(S.apply(sc, 'set_pot', { pot: 1 }).ok, false); // less than the bets already in
+  assert.deepEqual(S.normalize(JSON.parse(JSON.stringify(sc))).scenario.potFix, sc.potFix); // kept when saved
+  S.apply(sc, 'new_hand', {}); assert.equal(S.money(sc).potShow[0], 3); // a new hand starts clean
+});

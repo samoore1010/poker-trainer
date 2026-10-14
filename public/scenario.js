@@ -66,6 +66,7 @@
       v: 2, bigBlind: bb, smallBlind: clamp(num(src.smallBlind, bb / 2), 0, bb), button: ((Math.round(num(src.button, n - 1)) % (n + 1)) + n + 1) % (n + 1),
       street: clamp(Math.round(num(src.street, 0)), 0, 4), deal: Math.round(num(src.deal, 0)),
       handNo: Math.max(1, Math.round(num(src.handNo, 1))), heroHidden: !!src.heroHidden,
+      ...(Array.isArray(src.potFix) && src.potFix.some(x => +x) ? { potFix: [0, 1, 2, 3].map(i => num(src.potFix[i], 0)) } : {}),
       hero: { name: 'You', stack: Math.max(0, num(src.hero && src.hero.stack, 200)), cards: [] },
       opponents: [], board: [], streets: [], note: typeof src.note === 'string' ? src.note.slice(0, 500) : '',
     };
@@ -330,6 +331,7 @@
     const left = seat => stackOf(sc, seat) - total[seat];
     const streets = []; let pot = 0, ended = null, dropped = 0;
     for (let s = 0; s < 4; s++) {
+      pot += (sc.potFix && sc.potFix[s]) || 0; // chips in the pot the betting here doesn't account for (the camera's pot)
       const contrib = new Array(players).fill(0), acted = new Set();
       const snap = { start: pot, contrib, max: 0, lastRaise: bb, lastAgg: null, acted, actions: [], next: null, complete: false };
       const put = (seat, to) => { const add = Math.max(0, Math.min(to - contrib[seat], left(seat))); contrib[seat] += add; total[seat] += add; return contrib[seat]; };
@@ -492,7 +494,7 @@
 
   const cap1 = x => x.charAt(0).toUpperCase() + x.slice(1);
   const seatName = (sc, seat) => (seat === 0 ? 'You' : seat === null || seat === undefined ? 'nobody' : sc.opponents[seat - 1].name);
-  function resetAction(sc) { sc.streets = [blankStreet(), blankStreet(), blankStreet(), blankStreet()]; sc.street = 0; }
+  function resetAction(sc) { sc.streets = [blankStreet(), blankStreet(), blankStreet(), blankStreet()]; sc.street = 0; delete sc.potFix; }
   // Finishes a street's betting the passive way: everyone still to act checks or calls (used when the table moves on).
   function completeStreet(sc, s) {
     for (let guard = 0; guard < 40; guard++) {
@@ -728,6 +730,19 @@
       if (!r.ok) return r;
       sc.street = s;
       return { ok: true, summary: `${cap1(STREETS[s])}: action on ${seat === 0 ? 'you' : seatName(sc, seat)}${r.log.length ? ` (${r.log.join(', ')})` : ''}` };
+    },
+    // The pot as the table on camera shows it, for the street being bet (pot: everything in, this street's bets
+    // included): whatever the betting here doesn't account for is added to that street's pot, so the pot, the pot odds
+    // and the advice use the real figure.
+    set_pot(sc, a) {
+      const m = money(sc), s = Math.min(m.frontier, 3), want = num(a.pot, NaN);
+      if (!(want > 0)) return { ok: false, error: 'pot must be a positive amount.' };
+      const fix = (sc.potFix || [0, 0, 0, 0]).slice(), d = want - m.potShow[s];
+      if (Math.abs(d) < 1e-9) return { ok: true, summary: 'Pot already matches' };
+      fix[s] = round(fix[s] + d);
+      if (m.potStart[s] + d < -1e-9) return { ok: false, error: 'pot is smaller than the bets in it.' };
+      sc.potFix = fix;
+      return { ok: true, summary: `Pot set to ${fmt(sc, want)}` };
     },
     // Takes back a fold (a misread, or a mis-click): the player is in the hand again. Wherever their turn came round
     // after it (and before the betting that was recorded went on), they check or call; the hand goes on from there.
