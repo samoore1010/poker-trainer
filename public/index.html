@@ -206,6 +206,8 @@
   /* Action bar, under the table: Fold · Check/Call · Bet/Raise (which opens the sizing: presets, a slider, Confirm) */
   .actbar { display: grid; gap: 8px; }
   .actbar[hidden] { display: none; }
+  /* while the camera follows a hand, the buttons' space stays when nobody's to act (between streets), so the panel doesn't jump */
+  .prog.steady .actbar[hidden]:not(:empty) { display: grid; visibility: hidden; }
   .ab-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; font: 600 .7rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
   .actbar.you .ab-head > span:first-child { color: var(--fg); }
   .ab-tip { color: var(--warn); }
@@ -332,15 +334,13 @@
   .crop-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); background: #111; color: #ddd; }
   .crop-bar .note { flex-basis: 100%; text-align: center; color: #aaa; margin: 0; font-size: .8rem; }
   .crop-bar button { min-height: 40px; }
-  .cam-live-row { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .76rem; }
-  .cam-live-row .ok { color: var(--good); } .cam-live-row .no { color: var(--warn); }
+  .live-st .ok { color: var(--good); } .live-st .no { color: var(--warn); }
   .cam-ai .lag { font-family: var(--mono); color: var(--fg); }
   .cam-info { display: grid; gap: 4px; min-width: 0; }
   .cam-btnrow { display: flex; gap: 6px; flex-wrap: wrap; }
   .cam-btnrow .cam-syncbtn { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: var(--accent); font-weight: 600; }
   .cam-ready { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: .74rem; }
   .cam-ready .ok { color: var(--good); } .cam-ready .no { color: var(--bad); } .cam-ready .un { color: var(--muted); }
-  .cam-ready .why { flex: 1 1 100%; color: var(--muted); }
   .cam-sync { display: grid; gap: 6px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); font-size: .8rem; }
   .cam-sync[hidden] { display: none; }
   .cam-sync.err { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
@@ -352,18 +352,27 @@
   .seat.camflash .plate, .hero.camflash .plate { animation: camflash 1.8s ease-out; }
   @keyframes camflash { 0%, 40% { box-shadow: 0 0 0 3px #5fc38a, 0 0 18px 4px rgba(95,195,138,.6); } 100% { box-shadow: 0 4px 10px rgba(0,0,0,.5); } }
   .cam-btnrow button { padding: 3px 9px; font-size: .74rem; background: transparent; }
-  .cam-read { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-size: .8rem; min-height: 22px; }
+  /* The readout keeps still: one line each (the full text on hover), and a fixed slot below for either a request that
+     needs you (highlighted, with its buttons) or the latest note. Nothing pops in and pushes the panel around. */
+  .cam-read { display: grid; gap: 3px; font-size: .8rem; min-width: 0; }
+  .cam-line { display: flex; gap: 12px; align-items: baseline; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.4em; }
+  .cam-line > span { overflow: hidden; text-overflow: ellipsis; }
+  .cam-line .act-txt { flex: 1 1 auto; min-width: 0; color: var(--muted); }
+  .cam-slot { height: 56px; overflow: hidden; }
+  .cam-slot #camNote { margin: 0; font-size: .78rem; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .cam-slot .cam-ask:not([hidden]) + #camNote { display: none; }
+  .cam-ask { height: 100%; box-sizing: border-box; display: flex; flex-wrap: wrap; align-content: center; align-items: center; gap: 3px 6px; padding: 4px 8px; border-radius: 7px; border: 1.5px solid var(--warn); background: color-mix(in srgb, var(--warn) 18%, transparent); font-size: .78rem; }
+  .cam-ask.soft { border-color: var(--line); background: color-mix(in srgb, var(--fg) 5%, transparent); }
+  .cam-ask .q { flex: 1 1 100%; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  .cam-ask .btns { display: flex; gap: 6px; min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .cam-ask button { flex: none; padding: 2px 9px; font-size: .74rem; white-space: nowrap; }
+  .cam-ask button.primary { padding: 2px 10px; }
   .cam-read b { font: 600 .66rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-right: 3px; }
   .camdock .note { margin: 0; }
   .cam-opt { display: inline-flex; gap: 6px; align-items: center; font-size: .78rem; }
   .cam-opt[hidden] { display: none; }
   .cam-ok { color: var(--good); font-weight: 700; }
   .cam-bet { flex: 1 1 100%; }
-  .cam-ai { margin-left: auto; }
-  .cam-conflict { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 6px 8px; border-radius: 6px; background: color-mix(in srgb, var(--warn) 18%, transparent); font-size: .78rem; }
-  .cam-btns { display: inline-flex; gap: 6px; margin-left: auto; }
-  .cam-conflict b { font: 700 .82rem var(--body); letter-spacing: 0; text-transform: none; color: var(--fg); margin: 0; }
-  .cam-btns button { padding: 3px 9px; font-size: .74rem; }
   @media (max-width: 860px) { .cam-view { --camh: clamp(150px, 30vh, 320px); } .ctl .hint { flex-basis: 100%; order: -2; margin: 0; } .ctl #nextBtn { flex-basis: 100%; order: -1; padding: 10px; } .ctl > button { flex: 1 1 0; white-space: nowrap; } .prog { grid-template-columns: 1fr; } .playdock { order: -1; } .camdock { border-right: 0; border-top: 1px solid var(--line); } }
 
   /* Advisor */
@@ -555,7 +564,7 @@
             <div class="cam-sync" id="camSyncBox" hidden></div>
             <div class="cam-body" id="camBody">
               <div class="cam-view" id="camView" title="Tap to crop and zoom"><canvas id="camPrev"></canvas><button type="button" class="cam-rot" id="camRot" title="Turn the picture a quarter turn (it also turns itself upright when the AI sees it sideways)" aria-label="Turn the picture">↻</button></div>
-              <div class="cam-info"><div class="cam-read" id="camRead"></div><p class="note" id="camNote">Starting the camera…</p></div>
+              <div class="cam-info"><div class="cam-read" id="camRead"></div><div class="cam-slot"><div class="cam-ask" id="camAsk" hidden></div><p class="note" id="camNote">Starting the camera…</p></div></div>
             </div>
             <div class="cam-btnrow"><button type="button" class="cam-syncbtn" id="camSync" hidden title="One careful read of the whole table: players, names, stacks, the dealer, the betting and the cards. You see what would change before anything does.">⟳ Sync table</button><button type="button" class="ghost" id="camFold" aria-expanded="true">▴ Hide view</button><button type="button" class="ghost" id="camReread" title="Unlock the cards and read the table from scratch">Re-read</button><button type="button" class="ghost" id="camClose">■ Stop</button></div>
           </div>
@@ -980,6 +989,8 @@
   }
   function renderActionBar() {
     const bar = $('actbar');
+    // (the space stays while the camera follows a hand still being played: nobody to act between streets)
+    const m = hand.m; $('prog').classList.toggle('steady', !!cam.stream && !m.ended && m.foldedAt[0] === null && step < 4);
     if (!isLive()) { bar.hidden = true; sizing = null; return; }
     const seat = hand.m.next, ch = SC.choices(scenario), you = seat === 0;
     const key = `${hand.deal}:${step}:${seat}:${(hand.m.street[step] || { actions: [] }).actions.length}`;
@@ -1006,7 +1017,8 @@
       if (ch.canRaise) parts.push(btn('raise', word, 'raise', `${word}: choose the size`));
       body = `<div class="ab-row">${parts.join('')}</div>`;
     }
-    bar.innerHTML = head + body;
+    const html = head + body; // redrawn only when it changes: a button under a finger stays the same button
+    if (bar.dataset.html !== html) { bar.dataset.html = html; bar.innerHTML = html; }
     bar.hidden = false;
     bar.classList.toggle('you', you);
   }
@@ -1026,7 +1038,7 @@
   }
   $('actbar').addEventListener('click', e => {
     if (e.target.closest('[data-auto]')) { autoPlay({ stopAtHero: true }); return; }
-    if (e.target.closest('[data-tome]')) { autoRun++; const r = edit('action_to', { seat: 0 }); if (!r.ok) coachNote(r.error, true); return; }
+    if (e.target.closest('[data-tome]')) { correctActionTo(0); return; }
     if (e.target.closest('[data-back]')) { sizing = null; renderActionBar(); return; }
     const ch = SC.choices(scenario); if (!ch) return;
     const pre = e.target.closest('[data-to]'); if (pre && sizing) { openSizing(+pre.dataset.to); return; }
@@ -1223,15 +1235,17 @@
   function openSeat(seat) {
     seatEdit = seat; document.body.classList.add('is-editing'); const el = $('seatpop'), pos = hand.pos[seat];
     const unitL = SC.getUnit() === 'bb' ? 'BB' : '$';
-    const seatBtns = `<button type="button" data-sp="dealer" title="Move the dealer button here (the betting starts over)" ${scenario.button === seat ? 'disabled' : ''}>Dealer here</button><button type="button" data-sp="actto" title="Put the action on this player: anyone before them folds (or checks when it's free)" ${canActTo(seat) && hand.m.next !== seat ? '' : 'disabled'}>Action to ${seat === 0 ? 'me' : 'them'}</button>`;
+    const folded = hand.m.foldedAt[seat] !== null;
+    const fix = folded ? `<div class="sp-row sp-btns sp-fix"><button type="button" class="primary" data-sp="back" title="Take back the fold: ${seat === 0 ? 'you are' : 'they are'} in the hand again, and the camera keeps to it">${seat === 0 ? 'I\'m still in the hand' : 'Back in the hand'}</button></div>` : '';
+    const seatBtns = `<button type="button" data-sp="dealer" title="Move the dealer button here (the betting starts over)" ${scenario.button === seat ? 'disabled' : ''}>Dealer here</button><button type="button" data-sp="actto" title="${cam.stream && liveOn() ? 'It\'s their turn: the players before them call or check, and the camera keeps to it until the bets change' : 'Put the action on this player: anyone before them folds (or checks when it\'s free)'}" ${canActTo(seat) && hand.m.next !== seat ? '' : 'disabled'}>Action to ${seat === 0 ? 'me' : 'them'}</button>`;
     const stackRow = st => `<div class="sp-row"><span class="sp-l">Stack</span><form class="sp-range" data-sp-stack><input name="stack" type="number" min="0" step="any" value="${stackShown(st)}" aria-label="Stack in ${unitL}"><button type="submit">Set ${unitL}</button></form></div>`;
     if (seat === 0) {
-      el.innerHTML = `<div class="cp-head"><span>You · ${pos}</span><button type="button" class="cp-x" data-sp="close" aria-label="Close">×</button></div>
+      el.innerHTML = `<div class="cp-head"><span>You · ${pos}</span><button type="button" class="cp-x" data-sp="close" aria-label="Close">×</button></div>${fix}
         <div class="sp-row sp-btns">${seatBtns}<button type="button" data-sp="mycards">Change cards</button></div>${stackRow(scenario.hero.stack)}`;
     } else {
       const o = scenario.opponents[seat - 1], inf = SC.inferredRanges(scenario);
       const rp = SC.effRange(o) ? Math.round(E.rangeOf(SC.effRange(o)).pct) : null;
-      el.innerHTML = `<div class="cp-head"><span>${esc(o.name)} · ${pos}</span><button type="button" class="cp-x" data-sp="close" aria-label="Close">×</button></div>
+      el.innerHTML = `<div class="cp-head"><span>${esc(o.name)} · ${pos}</span><button type="button" class="cp-x" data-sp="close" aria-label="Close">×</button></div>${fix}
       <div class="sp-row"><span class="sp-l">Plays</span><div class="sp-chips">${STYLE_CHIPS.map(([v, l]) => `<button type="button" data-sp-style="${v}" class="${!o.range && (o.style || '') === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
       <div class="sp-row"><span class="sp-l">Range</span><div class="sp-chips">${[8, 15, 25, 40].map(p => `<button type="button" data-sp-range="top ${p}%" class="${o.range === `top ${p}%` ? 'on' : ''}">Top ${p}%</button>`).join('')}</div></div>
       <form class="sp-range" data-sp-form><input name="range" value="${esc(o.range || '')}" placeholder="e.g. TT+, AQs+, AKo" aria-label="Range"><button type="submit">Set</button></form>
@@ -1253,7 +1267,8 @@
     const seat = seatEdit;
     if (b.dataset.sp === 'close') return closeSeat();
     if (b.dataset.sp === 'dealer') { autoRun++; edit('set_button', { seat }); return openSeat(seat); }
-    if (b.dataset.sp === 'actto') { autoRun++; const r = edit('action_to', { seat }); closeSeat(); if (!r.ok) coachNote(r.error, true); return; }
+    if (b.dataset.sp === 'actto') { closeSeat(); correctActionTo(seat); return; }
+    if (b.dataset.sp === 'back') { closeSeat(); correctBringBack(seat); return; }
     if (b.dataset.sp === 'mycards') { closeSeat(); return openPicker({ kind: 'hero', i: 0 }); }
     if ('spStyle' in b.dataset) { edit('set_opponent', { seat, style: b.dataset.spStyle, range: '' }); return openSeat(seat); }
     if (b.dataset.spRange) { edit('set_opponent', { seat, range: b.dataset.spRange }); return openSeat(seat); }
@@ -1512,9 +1527,48 @@
     } catch (e) { aiFailed(e); } finally { L.inflight--; if (kind === 'full') L.fullBusy = false; renderCamRead(); }
   }
   // While actions are being played onto the table one by one, newer readings wait for it (the latest one only).
+  // ----- your corrections come first -----
+  // When you put a player back in the hand, or say whose turn it is, the camera's readings are bent to fit: the player
+  // stays in for the rest of the street (a fold the camera keeps seeing is taken as a misread), and the turn stays where
+  // you put it until the chips in front of the players or the folds change (someone has acted: the camera follows from there).
+  // A new street or a new hand clears them.
+  function pinState() {
+    const key = `${scenario.deal}:${scenario.board.length}`;
+    if (!cam.pins || cam.pins.key !== key) cam.pins = { key, inHand: new Set(), toAct: null };
+    return cam.pins;
+  }
+  function pinned(T) {
+    const P = pinState(); if (!P.inHand.size && !P.toAct) return T;
+    const seats = T.seats.map((x, i) => (P.inHand.has(i) && x.folded ? { ...x, folded: false, last: x.last === 'fold' ? 'none' : x.last } : x));
+    let toAct = T.toAct;
+    if (P.toAct && T.readable.betting && T.seats.length === scenario.opponents.length + 1) {
+      const bets = T.seats.map(x => `${x.bet}${x.folded ? 'f' : ''}`).join();
+      if (P.toAct.bets === null) P.toAct.bets = bets;
+      if (bets === P.toAct.bets) toAct = P.toAct.seat; else P.toAct = null;
+    }
+    return { ...T, seats, toAct, held: !!P.toAct };
+  }
+  const following = () => !!cam.stream && liveOn();
+  function correctBringBack(seat) {
+    autoRun++; closePicker();
+    const r = edit('bring_back', { seat });
+    if (!r.ok) { coachNote(r.error, true); return; }
+    if (cam.stream) { pinState().inHand.add(seat); if (cam.live) cam.live.bad = 0; cam.betNote = 'Betting: following your correction.'; cam.betAt = Date.now(); camNote(`${r.summary}: the camera keeps to that.`); renderCamRead(); }
+  }
+  function correctActionTo(seat) {
+    autoRun++; closePicker();
+    const live = following(), r = edit('action_to', { seat, passive: live });
+    if (!r.ok) { coachNote(r.error, true); return; }
+    if (live) {
+      const T = cam.sync, n = scenario.opponents.length + 1;
+      pinState().toAct = { seat, bets: T && T.readable.betting && T.seats.length === n ? T.seats.map(x => `${x.bet}${x.folded ? 'f' : ''}`).join() : null };
+      cam.live.bad = 0; cam.betNote = 'Betting: following your correction.'; cam.betAt = Date.now(); camNote(`Action on ${seat === 0 ? 'you' : scenario.opponents[seat - 1].name}: the camera keeps to that until someone acts.`); renderCamRead();
+    }
+  }
   function applyLive(T, capturedAt) {
     if (cam.anim) { cam.pendingLive = [T, capturedAt]; return; }
     noteRotation(T.rotate);
+    T = pinned(T);
     if (T.live && T.seats.length && T.seats.length !== scenario.opponents.length + 1) cam.live.seatMiss++; // the seats no longer match: a full read will sort it out
     cam.sync = T.live && cam.sync ? { ...cam.sync, ...T, readable: { ...cam.sync.readable, cards: T.readable.cards, betting: T.readable.betting }, seats: cam.sync.seats.length === T.seats.length ? cam.sync.seats.map((x, i) => ({ ...x, ...T.seats[i], name: x.name, stack: x.stack, dealer: x.dealer })) : T.seats } : T;
     const street = T.readable.cards && T.board ? BOARD_N.indexOf(T.board.length) : Math.max(0, BOARD_N.indexOf(scenario.board.length));
@@ -1540,6 +1594,7 @@
     const L = cam.live, done = () => { then && then(); };
     if (!T.readable.betting) { cam.betNote = 'Betting: not readable in this picture.'; L.inSync = false; return done(); }
     if (T.seats.length !== scenario.opponents.length + 1) { cam.betNote = `Betting: waiting for the table to match the camera (${T.seats.length} players on camera).`; L.inSync = false; return done(); }
+    if (T.held) { cam.betNote = 'Betting: keeping your correction until someone acts.'; return done(); } // you said whose turn it is
     let res = SC.trackTable(scenario, T, street), rebuilt = '';
     if (!res.ok) {
       L.bad = (L.bad || 0) + 1;
@@ -1549,6 +1604,15 @@
       res = rb; rebuilt = rb.scope === 'hand' ? 'the hand' : `the ${STEP[street].toLowerCase()}`;
     }
     L.bad = 0;
+    // ending the hand (everyone folds to one player) or folding you is the costliest misread: the picture has to
+    // show it steadily for two seconds first
+    const ends = (a => (!!a.ended && !hand.m.ended) || (a.foldedAt[0] !== null && hand.m.foldedAt[0] === null))(SC.money(res.sc));
+    if (ends) {
+      const key = JSON.stringify([street, T.seats.map(x => x.folded)]), now = Date.now();
+      if (!L.endHold || L.endHold.key !== key) L.endHold = { key, since: now };
+      if (now - L.endHold.since < 2000) { cam.betNote = 'Betting: making sure before ending the hand…'; return done(); }
+    }
+    L.endHold = null;
     L.inSync = !res.partial;
     if (!res.log.length && !rebuilt) { if (!cam.betAt || /not |checking/.test(cam.betNote)) cam.betNote = 'Betting: up to date.'; return done(); }
     L.changedTable = true;
@@ -1653,9 +1717,11 @@
     const mark = (label, v, why) => `<span class="${v === true ? 'ok' : v === false ? 'no' : 'un'}"${why ? ` title="${esc(why)}"` : ''}>${label} ${v === true ? '✓' : v === false ? '✗' : '–'}</span>`;
     let html = mark('Picture', Q ? Q.ok : null, Q && Q.issues.join(', '));
     if (ai) html += ['cards', 'seats', 'names', 'stacks', 'betting'].map(k => mark(k[0].toUpperCase() + k.slice(1), T ? T.readable[k] : null)).join('');
+    // (the reasons are in the tooltips; a bad picture also gets a note, once, rather than a line that comes and goes)
     const why = Q && !Q.ok ? `The picture looks ${Q.issues.join(' and ')}.` : !ai ? '' : !T ? (liveOn() ? 'Reading the table…' : 'Turn on Follow the table live, or press ⟳ Sync table, to check what the camera can read.') : T.problems.length ? `Not readable: ${T.problems.join('; ')}.` : '';
-    if (why) html += `<span class="why">${esc(why)}</span>`;
-    $('camReady').innerHTML = html;
+    $('camReady').title = why;
+    if (Q && !Q.ok && cam.badPicNote !== why) { cam.badPicNote = why; camNote(why, false, true); } else if (Q && Q.ok) cam.badPicNote = '';
+    if ($('camReady').dataset.html !== html) { $('camReady').dataset.html = html; $('camReady').innerHTML = html; }
   }
   // A quick look at the picture: too dark, washed out, blurry, or the cards too small to read.
   function pictureCheck(px, W, H, r) {
@@ -1698,7 +1764,7 @@
   function stopCamera() {
     clearTimeout(cam.timer); cam.timer = 0;
     if (cam.stream) cam.stream.getTracks().forEach(t => t.stop());
-    cam.stream = null; $('camVideo').srcObject = null; $('camDot').classList.remove('on'); $('camOn').hidden = true; $('camOff').hidden = false; cam.plan = null; cam.syncMsg = null; cam.synced = false; renderSyncBox();
+    cam.stream = null; $('camVideo').srcObject = null; $('camDot').classList.remove('on'); $('prog').classList.remove('steady'); $('camOn').hidden = true; $('camOff').hidden = false; cam.plan = null; cam.syncMsg = null; cam.synced = false; renderSyncBox();
   }
   function camLoop() {
     if (!cam.stream) return;
@@ -1757,31 +1823,60 @@
     if (!cam.lock || !hand) return;
     const lh = lockedHero(), lb = lockedBoard(), ai = aiReady();
     const mark = srcs => (!ai ? '' : srcs.some(x => x === 'fast') ? ' <span class="note" title="AI check pending">⋯</span>' : srcs.length ? ' <span class="cam-ok" title="Confirmed">✓</span>' : '');
-    let html = `<span><b>You</b>${lh ? `🔒 ${esc(cardsTxt(lh))}${mark([cam.lock.hero])}` : '<span class="note">waiting</span>'}</span><span><b>Board</b>${lb.length ? `🔒 ${esc(cardsTxt(lb))}${mark(cam.lock.board)}` : '<span class="note">none yet</span>'}</span>`;
+    const lines = [`<div class="cam-line"><span><b>You</b>${lh ? `🔒 ${esc(cardsTxt(lh))}${mark([cam.lock.hero])}` : '<span class="note">waiting</span>'}</span><span><b>Board</b>${lb.length ? `🔒 ${esc(cardsTxt(lb))}${mark(cam.lock.board)}` : '<span class="note">none yet</span>'}</span></div>`];
     const L = cam.live || {};
     if (liveOn()) {
-      const ago = L.at ? `${((Date.now() - L.at) / 1000).toFixed(1)} s ago` : 'starting…';
       const sec = x => (x / 1000).toFixed(1) + ' s';
-      html += `<span class="note cam-ai" title="Lag: from the moment the picture changed to the moment this table showed it (last, and the running average). A read: how long one short reading takes; the full reading (names, stacks, dealer) runs every 10 s.">Live · <b class="lag">lag ${L.lag ? `${sec(L.lag)} (avg ${sec(L.lagAvg)})` : '–'}</b> · read ${L.ms ? sec(L.ms) : '…'}${L.fullMs ? ` · full ${sec(L.fullMs)}` : ''} · last ${ago} · ${cam.ai.calls} reads${L.inflight ? ` · ${L.inflight} on the way` : ''}${L.box ? ' · cropped' : ''}</span>`;
+      const detail = `Lag: from the moment the picture changed to the moment this table showed it${L.lag ? ` (last ${sec(L.lag)}, average ${sec(L.lagAvg)})` : ''}. One short reading takes ${L.ms ? sec(L.ms) : '…'}${L.fullMs ? `; the full reading (names, stacks, dealer) ${sec(L.fullMs)}, every 10 s` : ''}. ${cam.ai.calls} readings${L.inflight ? `, ${L.inflight} on the way` : ''}${L.box ? ', cropped to the table' : ''}.`;
       const T = cam.sync, k = T && T.unit === 'bb' ? scenario.bigBlind : 1, potT = hand.m.potShow[Math.min(hand.m.frontier, 3)];
-      const row = [];
-      if (T && T.pot) row.push(Math.abs(T.pot * k - potT) < 0.01 * Math.max(1, scenario.bigBlind) + 1e-9 ? `<span class="ok">Pot ${money(potT)} ✓</span>` : `<span class="no" title="The pot the camera sees doesn't match this table's: some betting may be missing">Pot: camera ${money(T.pot * k)} · table ${money(potT)}</span>`);
-      if (T && T.toAct !== null && T.seats[T.toAct]) row.push(`<span>To act: ${esc(T.toAct === 0 ? 'you' : T.seats[T.toAct].name || hand.pos[T.toAct] || 'seat ' + T.toAct)}${hand.m.next === T.toAct ? ' <span class="ok">✓</span>' : ''}</span>`);
-      if (cam.betNote) row.push(`<span>${esc(cam.betNote)}${cam.betAt ? ` · ${Math.round((Date.now() - cam.betAt) / 1000)} s ago` : ''}</span>`);
-      if (cam.seatNote) row.push(`<span>${esc(cam.seatNote)}</span>`);
-      html += `<div class="cam-live-row">${row.join('')}</div>`;
-    } else html += `<span class="note cam-ai">${ai ? `AI check · ${cam.ai.calls} call${cam.ai.calls === 1 ? '' : 's'}` : HV && HV.api.has('vision') ? 'AI check paused' : 'On-device only'}${cam.ai.busy ? ' · checking…' : ''}</span>`;
-    if (cam.conflict) {
-      const c = cam.conflict;
-      html += `<div class="cam-conflict">The camera reads ${c.kind === 'hero' ? 'your cards' : 'the board'} as <b>${esc(cardsTxt(c.cards))}</b>; the table has ${esc(cardsTxt(c.was))}. <span class="cam-btns"><button type="button" data-cam="use">Use the camera's</button><button type="button" data-cam="keep">Keep</button></span></div>`;
-    }
-    $('camRead').innerHTML = html;
+      const st = [];
+      if (T && T.pot) st.push(Math.abs(T.pot * k - potT) < 0.01 * Math.max(1, scenario.bigBlind) + 1e-9 ? `<span class="ok">Pot ${money(potT)} ✓</span>` : `<span class="no" title="The pot the camera sees doesn't match this table's: some betting may be missing">Pot ${money(T.pot * k)} on camera · ${money(potT)} here</span>`);
+      if (T && T.toAct !== null && T.seats[T.toAct]) st.push(`<span>To act: ${esc(T.toAct === 0 ? 'you' : T.seats[T.toAct].name || hand.pos[T.toAct] || 'seat ' + T.toAct)}${hand.m.next === T.toAct ? ' <span class="ok">✓</span>' : ''}</span>`);
+      st.push(`<span class="note cam-ai" title="${esc(detail)}">Live · lag <b class="lag">${L.lag ? sec(L.lag) : '–'}</b></span>`);
+      lines.push(`<div class="cam-line live-st">${st.join('')}</div>`);
+      const actTxt = cam.betNote ? `${cam.betNote}${cam.betAt ? ` · ${Math.round((Date.now() - cam.betAt) / 1000)} s ago` : ''}` : 'Betting: waiting for the first reading.';
+      lines.push(`<div class="cam-line"><span class="act-txt" title="${esc(actTxt + (cam.seatNote ? '\n' + cam.seatNote : ''))}">${esc(actTxt)}</span></div>`);
+    } else lines.push(`<div class="cam-line"><span class="note cam-ai">${ai ? `AI check · ${cam.ai.calls} call${cam.ai.calls === 1 ? '' : 's'}` : HV && HV.api.has('vision') ? 'AI check paused' : 'On-device only'}${cam.ai.busy ? ' · checking…' : ''}</span></div>`);
+    $('camRead').innerHTML = lines.join('');
+    renderAsk();
     renderReady();
   }
-  $('camRead').addEventListener('click', e => {
-    const b = e.target.closest('[data-cam]'); if (!b || !cam.conflict) return;
+  // What needs you, most important first: the camera and the table disagree about cards; the hand looks over (one tap
+  // puts back whoever the camera got wrong); the camera sees different players or a moved button.
+  function askNow() {
+    if (cam.conflict) {
+      const c = cam.conflict;
+      return { cls: '', q: `The camera reads ${c.kind === 'hero' ? 'your cards' : 'the board'} as ${cardsTxt(c.cards)}; the table has ${cardsTxt(c.was)}.`, btns: [['use', 'Use the camera\'s', 1], ['keep', 'Keep']] };
+    }
+    if (!following()) return null;
+    const m = hand.m, youOut = m.foldedAt[0] !== null, overKey = `${scenario.deal}:${JSON.stringify(m.foldedAt)}`;
+    if ((m.ended || youOut) && cam.overOk !== overKey) {
+      // the latest folds are the likeliest misreads
+      const recent = [];
+      for (let t = Math.min(m.frontier, 3); t >= 0 && recent.length < 2; t--) for (const a of scenario.streets[t].actions.slice().reverse()) if (a.type === 'fold' && a.seat !== 0 && !recent.includes(a.seat) && recent.length < 2) recent.push(a.seat);
+      const btns = (youOut ? [['back:0', 'I\'m still in', 1]] : []).concat(recent.map(x => [`back:${x}`, `${scenario.opponents[x - 1].name} is in`]), [['okover', 'That\'s right']]);
+      return { cls: 'soft', q: youOut ? 'You folded. Not right?' : m.ended.winner === 0 ? 'Everyone folded: you win. Not right?' : `${scenario.opponents[m.ended.winner - 1].name} wins. Not right?`, btns };
+    }
+    if (cam.seatNote && cam.seatNoteHide !== cam.seatNote) return { cls: 'soft', q: cam.seatNote, btns: [['sync', 'Sync now', 1], ['later', 'Later']] };
+    return null;
+  }
+  function renderAsk() {
+    const A = askNow(), el = $('camAsk');
+    el.hidden = !A; if (!A) { el.innerHTML = ''; el.dataset.key = ''; return; }
+    const key = JSON.stringify(A); if (el.dataset.key === key) return; el.dataset.key = key; // unchanged: leave it (no flicker under a finger)
+    el.className = 'cam-ask' + (A.cls ? ' ' + A.cls : '');
+    el.innerHTML = `<span class="q" title="${esc(A.q)}">${esc(A.q)}</span><span class="btns">${A.btns.map(([k, l, pr]) => `<button type="button" data-cam="${k}"${pr ? ' class="primary"' : ''}>${esc(l)}</button>`).join('')}</span>`;
+  }
+  $('camAsk').addEventListener('click', e => {
+    const b = e.target.closest('[data-cam]'); if (!b) return;
+    const k = b.dataset.cam;
+    if (k.startsWith('back:')) return correctBringBack(+k.slice(5));
+    if (k === 'okover') { const m = hand.m; cam.overOk = `${scenario.deal}:${JSON.stringify(m.foldedAt)}`; return renderCamRead(); }
+    if (k === 'sync') { cam.seatNoteHide = cam.seatNote; renderCamRead(); return syncTable(); }
+    if (k === 'later') { cam.seatNoteHide = cam.seatNote; return renderCamRead(); }
+    if (!cam.conflict) return;
     const c = cam.conflict; cam.conflict = null;
-    if (b.dataset.cam === 'keep') { cam.ignore = c.key; renderCamRead(); return; }
+    if (k === 'keep') { cam.ignore = c.key; renderCamRead(); return; }
     autoRun++; closePicker();
     if (c.kind === 'hero') { edit('set_hero_cards', { cards: c.cards }); syncLock(); cam.lock.hero = 'you'; }
     else { edit('set_board', { cards: c.cards }); syncLock(); cam.lock.board = c.cards.map(() => 'you'); const t = BOARD_N.indexOf(c.cards.length); if (step > t) go(t); }

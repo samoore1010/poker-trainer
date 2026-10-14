@@ -339,3 +339,52 @@ test('live tracking: a wrong table is rebuilt from the camera (the camera wins)'
   const T2 = { ...T, seats: T.seats.map((x, i) => i === at('UTG') ? { ...x, bet: 8 } : x) };
   assert.equal(S.trackTable(r.sc, T2, 0).ok, false);
 });
+
+test('live tracking: a hand the table wrongly ended is reopened by the camera', () => {
+  const sc = S.create({ opponents: 3, stack: 200, randomStacks: false });
+  const pos = S.positions(sc), at = p => pos.indexOf(p);
+  const seat = (o = {}) => ({ name: '', stack: 190, dealer: false, folded: false, bet: 0, last: 'none', ...o });
+  // a misread: everyone folded to your big blind, so "you win"
+  for (const p of ['UTG', 'BTN', 'SB']) S.apply(sc, 'act', { seat: at(p), action: 'fold' });
+  assert.ok(S.money(sc).ended);
+  // the camera keeps showing UTG in with a raise to 6 and the button to act: the table can't just say "up to date"
+  const T = { unit: 'chips', pot: 9, toAct: at('BTN'), seats: pos.map(p => seat(p === 'UTG' ? { bet: 6, last: 'raise' } : p === 'SB' ? { bet: 1 } : p === 'BB' ? { bet: 2 } : {})) };
+  const t = S.trackTable(sc, T, 0);
+  assert.equal(t.ok, false); assert.ok(t.wrongTurn);
+  const r = S.rebuildFrom(sc, T, 0);
+  assert.ok(r.ok, r.error);
+  const m = S.money(r.sc);
+  assert.equal(m.ended, null); assert.equal(m.foldedAt[at('UTG')], null); assert.equal(m.next, at('BTN'));
+});
+
+test('bring back: a fold is taken back and the hand goes on', () => {
+  const sc = S.create({ opponents: 3, stack: 200, randomStacks: false });
+  const pos = S.positions(sc), at = p => pos.indexOf(p);
+  // UTG raises, BTN calls, SB folds, and you (in the big blind) were folded by mistake
+  S.apply(sc, 'act', { seat: at('UTG'), action: 'raise', amount: 6 });
+  S.apply(sc, 'act', { seat: at('BTN'), action: 'call' });
+  S.apply(sc, 'act', { seat: at('SB'), action: 'fold' });
+  S.apply(sc, 'act', { seat: 0, action: 'fold' });
+  assert.notEqual(S.money(sc).foldedAt[0], null);
+  const r = S.apply(sc, 'bring_back', { seat: 0 });
+  assert.ok(r.ok, r.error);
+  const m = S.money(sc);
+  assert.equal(m.foldedAt[0], null); assert.equal(m.next, 0); // your turn again, facing the raise
+  // a player folded preflop by mistake, with the flop already bet: they're back, checking or calling where their turn came
+  const sc2 = S.create({ opponents: 3, stack: 200, randomStacks: false });
+  const p2 = S.positions(sc2), at2 = p => p2.indexOf(p);
+  S.apply(sc2, 'act', { seat: at2('UTG'), action: 'fold' });
+  S.apply(sc2, 'act', { seat: at2('BTN'), action: 'call' });
+  S.apply(sc2, 'act', { seat: at2('SB'), action: 'call' });
+  S.apply(sc2, 'act', { seat: 0, action: 'check' });
+  S.apply(sc2, 'set_board', { cards: ['Ah', '7c', '2d'] });
+  S.apply(sc2, 'act', { seat: at2('SB'), action: 'check' });
+  S.apply(sc2, 'act', { seat: 0, action: 'bet', amount: 4 });
+  const r2 = S.apply(sc2, 'bring_back', { seat: at2('UTG') });
+  assert.ok(r2.ok, r2.error);
+  const m2 = S.money(sc2);
+  assert.equal(m2.foldedAt[at2('UTG')], null);
+  assert.equal(m2.street[0].contrib[at2('UTG')], 2); // called the big blind where the fold was
+  assert.equal(m2.next, at2('UTG')); // and now faces your flop bet
+  assert.equal(S.apply(sc2, 'bring_back', { seat: at2('UTG') }).ok, false); // not folded any more
+});
