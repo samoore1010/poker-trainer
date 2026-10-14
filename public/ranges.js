@@ -74,8 +74,8 @@
     tight: { aggro: 0.95, bluff: 0.7, call: 0.8, text: 'Tight: fewer bluffs and fewer loose calls.' },
     lag: { aggro: 1.3, bluff: 1.7, call: 1.05, text: 'Loose-aggressive: bets and raises a lot, with plenty of bluffs.' },
     loose: { aggro: 1.1, bluff: 1.3, call: 1.35, text: 'Loose: plays and calls wider than a solid player.' },
-    fish: { aggro: 0.6, bluff: 0.7, call: 1.9, text: 'A fish: calls far too much, rarely raises.' },
-    station: { aggro: 0.5, bluff: 0.5, call: 2.3, text: 'A calling station: calls with almost any piece, rarely raises or bluffs.' },
+    fish: { aggro: 0.6, bluff: 0.7, call: 1.9, floor: 0.25, text: 'A fish: calls far too much, rarely raises.' },
+    station: { aggro: 0.5, bluff: 0.5, call: 2.3, floor: 0.6, text: 'A calling station: calls with almost any piece, rarely raises or bluffs.' },
     maniac: { aggro: 1.6, bluff: 2.4, call: 1.3, text: 'A maniac: bets and raises constantly, many bluffs.' },
   };
   function modsFor(style) {
@@ -89,22 +89,29 @@
     if (/tight|tag/.test(s)) return MODS.tight;
     return MODS.regular;
   }
-  // sit: {facing, price (call ÷ pot after calling), river, cbet (preflop raiser, first in on the flop), mods}
+  // sit: {facing, price (call ÷ pot after calling), river, cbet (preflop raiser, first in on the flop), mods, others (players
+  //   in the hand besides this one and one opponent: fewer bluffs into several players), callers (players who already called
+  //   this bet: overcalls are tighter)}
   // → not facing: {check, small, big}; facing: {fold, call, raise}
   function freqs(key, sit) {
     const m = sit.mods || MODS.regular, value = key === 'S' || key === 'G';
     if (!sit.facing) {
       let [b, big] = OPEN[key];
-      if (sit.river && key === 'A') { b = 0.3; big = 0.6; } // missed draws turn into big river bluffs
+      if (sit.river && key === 'A') { b = 0.18; big = 0.55; } // some missed draws turn into big river bluffs (fewer than a solver would: live players under-bluff rivers)
       if (sit.river && key === 'D1') b = 0.2;
       if (sit.cbet && !value) b *= 1.5; // the preflop raiser continuation-bets wide
+      if (sit.others && (key === 'A' || key === 'W' || key === 'D1')) b /= 1 + 0.6 * sit.others; // few bluffs into several players
       b = clamp(b * (value || key === 'M' ? m.aggro : m.bluff), 0.02, 0.95);
       return { check: 1 - b, small: b * (1 - big), big: b * big };
     }
     let [r, c] = FACE[key];
     if (sit.river && (key === 'D2' || key === 'D1')) { r = 0.06; c = 0.05; }
     if (sit.river && key === 'A') { r = 0.06; c = 0.02; }
-    if (!value) c *= clamp(1.4 - (sit.price || 0.25) * 2, 0.5, 1.2) * m.call; // bigger bets get fewer calls from middling hands
+    // bigger bets get fewer calls: middling hands drop off fast, good hands (top pair, overpairs) more slowly
+    if (!value) c *= clamp(1.4 - (sit.price || 0.25) * 2, 0.5, 1.2) * m.call;
+    else if (key === 'G') c *= clamp(1.3 - (sit.price || 0.25) * 1.8, 0.35, 1.1);
+    if (sit.callers && key !== 'S') { c /= 1 + 0.5 * sit.callers; if (!value) r /= 1 + 0.5 * sit.callers; } // overcalling after others called: tighter
+    if (!value && m.floor) c = Math.max(c, m.floor * clamp(1.3 - (sit.price || 0.25) * 1.5, 0.5, 1)); // stations call down light: ace high, any pair
     r = clamp(r * (value || key === 'D2' ? m.aggro : m.bluff), 0, 0.9);
     c = clamp(c, 0, 0.97 - r);
     return { fold: 1 - r - c, call: c, raise: r };

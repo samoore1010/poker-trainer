@@ -271,3 +271,54 @@ test('sync table: offers only what was read clearly, applies picked lines, keeps
   // seats unreadable: nothing at all
   assert.equal(S.syncPlan(sc, { ...T, readable: { ...T.readable, seats: false } }).length, 0);
 });
+
+test('player stats: only real decisions count; a style follows from enough hands; your own call wins', () => {
+  const sc = S.create({ opponents: 2, stack: 200, randomStacks: false });
+  sc.opponents[0].name = 'Ravi'; sc.opponents[1].name = 'Greta';
+  const pos = S.positions(sc), seatOf = p => pos.indexOf(p); // you BB: BTN and SB act first
+  S.apply(sc, 'act', { seat: seatOf('BTN'), action: 'call' });
+  S.apply(sc, 'act', { seat: seatOf('SB'), action: 'raise', amount: 8, auto: true }); // the computer's move
+  const hs = S.handStats(sc);
+  assert.deepEqual(Object.keys(hs), [sc.opponents[seatOf('BTN') - 1].name.toLowerCase()]);
+  assert.equal(Object.values(hs)[0].vpip, 1); assert.equal(Object.values(hs)[0].pfr, 0);
+  // 20 hands of calling almost everything, never raising: a calling station
+  const book = {};
+  for (let i = 0; i < 20; i++) S.addStats(book, { ravi: { name: 'Ravi', hands: 1, vpip: i % 5 ? 1 : 0, pfr: 0, agg: 0, calls: 2 } });
+  assert.equal(S.styleFromStats(book.ravi), 'calling station');
+  assert.equal(S.styleFromStats({ hands: 5, vpip: 5, pfr: 0, agg: 0, calls: 0 }), null); // too few hands
+  assert.equal(S.styleFromStats({ hands: 30, vpip: 3, pfr: 2, agg: 1, calls: 1 }), 'nit');
+  assert.equal(S.styleFromStats({ hands: 30, vpip: 6, pfr: 5, agg: 5, calls: 3 }), 'tight');
+  assert.deepEqual(S.applyStats(sc, book), ['Ravi: calling station']);
+  assert.equal(sc.opponents[0].styleBy, 'stats');
+  S.apply(sc, 'set_opponent', { seat: 1, style: 'nit' }); // you know better
+  assert.deepEqual(S.applyStats(sc, book), []); assert.equal(sc.opponents[0].style, 'nit');
+  assert.equal(S.normalize(sc).scenario.opponents[0].styleBy, 'you');
+});
+
+test('live tracking: follows chips, folds and whose turn; repairs folds a fast flop filled in as calls', () => {
+  const sc = S.create({ opponents: 5, stack: 200, randomStacks: false });
+  const pos = S.positions(sc), at = p => pos.indexOf(p);
+  const seat = (o = {}) => ({ name: '', stack: 190, dealer: false, folded: false, bet: 0, last: 'none', ...o });
+  const table = (bySeat, toAct) => ({ unit: 'chips', toAct, seats: pos.map((p, i) => seat({ dealer: p === 'BTN', ...(bySeat[p] || {}) })) });
+  // preflop: UTG raises to 5, HJ folds, CO calls, BTN folds; the small blind is to act
+  const pre = table({ BB: { bet: 2, last: 'post' }, SB: { bet: 1, last: 'post' }, UTG: { bet: 5, last: 'raise' }, HJ: { folded: true, last: 'fold' }, CO: { bet: 5, last: 'call' }, BTN: { folded: true, last: 'fold' } }, at('SB'));
+  const r1 = S.trackTable(sc, pre, 0);
+  assert.ok(r1.ok, r1.error);
+  const m1 = S.money(r1.sc);
+  assert.equal(m1.next, at('SB')); assert.equal(m1.street[0].max, 5);
+  assert.deepEqual(m1.street[0].actions.map(a => `${pos[a.seat]} ${a.type}`), ['UTG raise', 'HJ fold', 'CO call', 'BTN fold']);
+  // the flop lands before the camera saw the small blind fold and you call: the table fills those in as calls
+  S.apply(r1.sc, 'set_board', { cards: ['Ah', '7c', '2d'] });
+  assert.equal(S.money(r1.sc).foldedAt[at('SB')], null);
+  // the next reading: the small blind folded; you checked, UTG bets 8, CO to act
+  const flop = table({ SB: { folded: true, last: 'fold' }, BB: { last: 'check' }, UTG: { bet: 8, last: 'bet' }, HJ: { folded: true }, BTN: { folded: true } }, at('CO'));
+  const r2 = S.trackTable(r1.sc, flop, 1);
+  assert.ok(r2.ok, r2.error);
+  const m2 = S.money(r2.sc);
+  assert.equal(m2.foldedAt[at('SB')], 0); // a preflop fold now, not a call
+  assert.equal(m2.next, at('CO')); assert.equal(m2.street[1].max, 8);
+  assert.equal(m2.potShow[1], 1 + 5 + 5 + 5 + 8); // SB's blind, three callers of 5 and the bet
+  // a reading that contradicts the table is refused
+  const bad = table({ UTG: { folded: true }, HJ: { folded: true }, BTN: { folded: true }, SB: { folded: true } }, at('CO'));
+  assert.equal(S.trackTable(r2.sc, bad, 1).ok, false);
+});

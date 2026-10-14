@@ -199,7 +199,9 @@ test('vision: rejects a missing image and answers 503 without any model', async 
 });
 
 test('vision: answers are cleaned: no repeats, a board of 0/3/4/5 and a hand of 0/2', () => {
-  assert.deepEqual(normalizeVision({ board: ['Kh', '7h', '2c', '9s'], hero: [], unsure: [] }), { board: ['Kh', '7h', '2c', '9s'], hero: null, betting: null, unsure: [] });
+  assert.deepEqual(normalizeVision({ board: ['Kh', '7h', '2c', '9s'], hero: [], unsure: [] }), { board: ['Kh', '7h', '2c', '9s'], hero: null, betting: null, unsure: [], rotate: 0 });
+  assert.equal(normalizeVision({ board: [], hero: [], unsure: [], rotate: 90 }).rotate, 90); // sideways: turn it a quarter clockwise
+  assert.equal(normalizeVision({ board: [], hero: [], unsure: [], rotate: 45 }).rotate, 0);
   const twice = normalizeVision({ board: ['Kh', '7h', '2c'], hero: ['Kh', 'Ad'], unsure: [] });
   assert.equal(twice.hero, null); assert.match(twice.unsure.join(), /twice/);
   assert.equal(normalizeVision({ board: ['Kh', '7h'], hero: ['As', 'Ad'], unsure: [] }).board, null);

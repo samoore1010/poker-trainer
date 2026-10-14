@@ -14,6 +14,8 @@ function loadConfig() {
     accessCode: str('ACCESS_CODE'),
     // Requests per minute per visitor IP, across all /api routes that call OpenAI.
     rateLimitPerMin: int('RATE_LIMIT_PER_MIN', 30),
+    // Camera reads (the AI check and following the table live, about one a second) have their own allowance.
+    cameraRateLimitPerMin: int('CAMERA_RATE_LIMIT_PER_MIN', 300),
     maxAudioBytes: int('MAX_AUDIO_MB', 15) * 1024 * 1024,
     openai: {
       apiKey: str('OPENAI_API_KEY'),
@@ -38,6 +40,9 @@ function loadConfig() {
       // Sync table (one detailed read of names, stacks and seats, on request): a more careful model by default.
       syncModel: str('VISION_SYNC_MODEL', 'claude-sonnet-5-5'),
       openaiSyncModel: str('OPENAI_VISION_SYNC_MODEL'),
+      // Following the table live (a whole-table read about every second): fast first. Defaults to VISION_MODEL.
+      liveModel: str('VISION_LIVE_MODEL'),
+      openaiLiveModel: str('OPENAI_VISION_LIVE_MODEL'),
       openaiModel: str('OPENAI_VISION_MODEL'),
       timeoutMs: int('VISION_TIMEOUT_MS', 20000),
     },

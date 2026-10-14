@@ -173,6 +173,12 @@
   .gauge span:nth-child(3) { background: color-mix(in srgb, var(--good) 75%, transparent); border-radius: 0 6px 6px 0; }
   .gauge i { position: absolute; top: -5px; bottom: -5px; width: 4px; margin-left: -2px; border-radius: 2px; background: var(--fg); box-shadow: 0 0 0 2px var(--panel); transition: left .25s ease; }
   .adv-why { font-size: .8rem; }
+  .evl { display: grid; gap: 3px; }
+  .evr { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 64px; gap: 8px; align-items: center; font-size: .8rem; }
+  .evr.best { font-weight: 600; }
+  .evb { height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+  .evb i { display: block; height: 100%; background: var(--good); } .evb i.neg { background: var(--bad); }
+  .evv { font: 600 .8rem var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
   .adv-hand { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 2px; padding: 9px 12px; border-radius: 8px; background: color-mix(in srgb, var(--fg) 7%, transparent); }
   .adv-hand .hn { display: grid; gap: 1px; min-width: 0; }
   .adv-hand .hn b { font: 600 1.15rem var(--body); }
@@ -255,6 +261,7 @@
   .sp-range input { flex: 1; min-width: 0; font: 400 .82rem var(--mono); padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
   .sp-range button, .sp-btns button { padding: 4px 10px; font-size: .78rem; }
   .seatpop .note { margin: 0; }
+  .sp-stats { font-size: .76rem; } .sp-stats button { padding: 2px 8px; font-size: .74rem; }
   .spk { padding: 1px 7px; font-size: .9rem; line-height: 1.2; border-color: transparent; background: transparent; }
   .pk-act .note { margin-right: auto; }
 
@@ -304,12 +311,21 @@
   .cam-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
   .cam-dot.on { background: var(--bad); box-shadow: 0 0 0 0 rgba(224,103,79,.6); animation: live 1.4s ease-in-out infinite; }
   @keyframes live { 50% { opacity: .35; box-shadow: 0 0 0 5px rgba(224,103,79,0); } }
-  .cam-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 10px; align-items: start; }
-  .cam-view { position: relative; background: #000; border-radius: 8px; overflow: hidden; aspect-ratio: 16 / 9; }
-  .cam-view video, .cam-view canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
-  /* hidden view: the video keeps playing (a truly hidden video can be paused by phones, which would stop the reading) */
-  .cam-body.folded { grid-template-columns: minmax(0, 1fr); }
-  .cam-body.folded .cam-view { position: absolute; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
+  .cam-body { display: grid; gap: 8px; align-items: start; }
+  /* the picture, upright, as large as the panel allows; tap it for full screen */
+  .cam-view { position: relative; background: #000; border-radius: 8px; overflow: hidden; height: clamp(160px, 30vh, 400px); cursor: zoom-in; }
+  .cam-view canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .cam-rot { position: absolute; right: 8px; bottom: 8px; width: 34px; height: 34px; padding: 0; border-radius: 50%; border: 0; background: rgba(0,0,0,.6); color: #fff; font-size: 1.1rem; }
+  /* the camera's own video never shows (it keeps playing: a hidden video can be paused by phones, which would stop the reading) */
+  .cam-src { position: absolute; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
+  .cam-body.folded .cam-view { display: none; }
+  .cam-full { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.92); display: grid; place-items: center; }
+  .cam-full[hidden] { display: none; }
+  .cam-full canvas { width: 100vw; height: 100vh; }
+  .cam-full .cp-x { position: absolute; top: 12px; right: 16px; font-size: 2rem; color: #fff; }
+  .cam-full .cam-rot { right: 20px; bottom: 20px; width: 48px; height: 48px; font-size: 1.5rem; }
+  .cam-live-row { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .76rem; }
+  .cam-live-row .ok { color: var(--good); } .cam-live-row .no { color: var(--warn); }
   .cam-info { display: grid; gap: 4px; min-width: 0; }
   .cam-btnrow { display: flex; gap: 6px; flex-wrap: wrap; }
   .cam-btnrow .cam-syncbtn { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: var(--accent); font-weight: 600; }
@@ -339,7 +355,7 @@
   .cam-btns { display: inline-flex; gap: 6px; margin-left: auto; }
   .cam-conflict b { font: 700 .82rem var(--body); letter-spacing: 0; text-transform: none; color: var(--fg); margin: 0; }
   .cam-btns button { padding: 3px 9px; font-size: .74rem; }
-  @media (max-width: 860px) { .ctl .hint { flex-basis: 100%; order: -2; margin: 0; } .ctl #nextBtn { flex-basis: 100%; order: -1; padding: 10px; } .ctl > button { flex: 1 1 0; white-space: nowrap; } .prog { grid-template-columns: 1fr; } .playdock { order: -1; } .camdock { border-right: 0; border-top: 1px solid var(--line); } .cam-body { grid-template-columns: 132px minmax(0, 1fr); } }
+  @media (max-width: 860px) { .cam-view { height: clamp(150px, 30vh, 320px); } .ctl .hint { flex-basis: 100%; order: -2; margin: 0; } .ctl #nextBtn { flex-basis: 100%; order: -1; padding: 10px; } .ctl > button { flex: 1 1 0; white-space: nowrap; } .prog { grid-template-columns: 1fr; } .playdock { order: -1; } .camdock { border-right: 0; border-top: 1px solid var(--line); } }
 
   /* Advisor */
   .advisor { background: var(--panel); border-left: 1px solid var(--line); display: grid; grid-template-rows: auto 1fr; min-height: 0; }
@@ -483,11 +499,12 @@
             <p class="dock-info" id="dockInfo"></p>
           </div>
           <div class="cam-on" id="camOn" hidden>
-            <div class="cam-head"><span class="cam-live"><i class="cam-dot" id="camDot"></i>Live</span><label title="Put the cards the camera reads on this table"><input type="checkbox" id="camAuto" checked> Update the table</label><label class="cam-opt" id="camBetsRow" hidden title="The AI also reads who folded, the chips in front of each player and whose turn it is; the betting is filled in only when it all adds up"><input type="checkbox" id="camBets"> Read the betting</label></div>
+            <video id="camVideo" class="cam-src" playsinline muted autoplay></video>
+            <div class="cam-head"><span class="cam-live"><i class="cam-dot" id="camDot"></i>Live</span><label title="Put the cards the camera reads on this table"><input type="checkbox" id="camAuto" checked> Update the table</label><label class="cam-opt" id="camBetsRow" hidden title="The AI reads the whole table about every second: who bet what, who folded, whose turn it is, the pot, names and stacks. The table follows it as it happens."><input type="checkbox" id="camBets"> Follow the table live</label></div>
             <div class="cam-ready" id="camReady"></div>
             <div class="cam-sync" id="camSyncBox" hidden></div>
             <div class="cam-body" id="camBody">
-              <div class="cam-view" id="camView"><video id="camVideo" playsinline muted autoplay></video><canvas id="camOverlay"></canvas></div>
+              <div class="cam-view" id="camView" title="Tap to see it bigger"><canvas id="camPrev"></canvas><button type="button" class="cam-rot" id="camRot" title="Turn the picture a quarter turn (it also turns itself upright when the AI sees it sideways)" aria-label="Turn the picture">↻</button></div>
               <div class="cam-info"><div class="cam-read" id="camRead"></div><p class="note" id="camNote">Starting the camera…</p></div>
             </div>
             <div class="cam-btnrow"><button type="button" class="cam-syncbtn" id="camSync" hidden title="One careful read of the whole table: players, names, stacks, the dealer, the betting and the cards. You see what would change before anything does.">⟳ Sync table</button><button type="button" class="ghost" id="camFold" aria-expanded="true">▴ Hide view</button><button type="button" class="ghost" id="camReread" title="Unlock the cards and read the table from scratch">Re-read</button><button type="button" class="ghost" id="camClose">■ Stop</button></div>
@@ -517,12 +534,14 @@
     </aside>
   </div>
 </div>
+<div class="cam-full" id="camFull" hidden role="dialog" aria-label="Camera picture"><canvas id="camFullCv"></canvas><button type="button" class="cp-x" id="camFullX" aria-label="Close">×</button><button type="button" class="cam-rot" id="camFullRot" aria-label="Turn the picture">↻</button></div>
 <div class="cardpick" id="cardpick" hidden role="dialog" aria-label="Choose a card"></div>
 <div class="cardpick seatpop" id="seatpop" hidden role="dialog" aria-label="Edit player"></div>
 <script src="engine.js"></script>
 <script src="setup-parser.js"></script>
 <script src="strategy.js"></script>
 <script src="ranges.js"></script>
+<script src="ev.js"></script>
 <script src="scenario.js"></script>
 <script src="voice.js"></script>
 <script src="vision.js"></script>
@@ -629,13 +648,25 @@
   let lastResult = store.get('walkthrough.lastResult');
   function nextHand() {
     pendingFlop = [null, null, null]; pendingHero = [null, null]; autoRun++; pushUndo(); lastReply = null;
+    recordStats(); // what each player did this hand, before the rest is played out by the computer
     const res = SC.settleHand(scenario, { hero: hand.hero, opps: hand.opps, board: hand.board });
     const who = i => (i === 0 ? 'You' : scenario.opponents[i - 1].name), net = res.stacks[0] - scenario.hero.stack;
     lastResult = { hand: scenario.handNo, text: `${res.winners.map(who).join(' and ')} ${res.winners.length > 1 ? 'split' : res.winners[0] === 0 ? 'win' : 'wins'} ${money(res.won.reduce((a, b) => a + b, 0))}${res.showdown ? ' at showdown' : ''}`, net };
     store.set('walkthrough.lastResult', lastResult);
     SC.apply(scenario, 'next_hand', { stacks: res.stacks });
+    const styled = SC.applyStats(scenario, statsBook);
+    if (styled.length) lastResult.styles = styled;
+    store.set('walkthrough.lastResult', lastResult);
     loadScenario(scenario, { prev: null });
   }
+  // ----- player stats: hand after hand, by name -----
+  let statsBook = store.get('walkthrough.players') || {};
+  function recordStats() {
+    if (store.get('walkthrough.statsDeal') === scenario.deal) return; // this hand is already counted
+    const hs = SC.handStats(scenario); if (!Object.keys(hs).length) return;
+    SC.addStats(statsBook, hs); store.set('walkthrough.players', statsBook); store.set('walkthrough.statsDeal', scenario.deal);
+  }
+  const statsOf = o => statsBook[o.name.toLowerCase()] || null;
   function resetTable() {
     pendingFlop = [null, null, null]; pendingHero = [null, null]; autoRun++; pushUndo(); lastReply = null; lastResult = null; store.set('walkthrough.lastResult', null);
     const n = scenario.opponents.length, bb = scenario.bigBlind;
@@ -913,8 +944,8 @@
     const S = sim(step); if (!S) return null;
     try { return SC.recommendation(scenario, step, hand.hero, board(), S); } catch (e) { return null; }
   }
-  function act(action, amount) {
-    const res = SC.apply(scenario, 'act', { action, amount });
+  function act(action, amount, auto) {
+    const res = SC.apply(scenario, 'act', { action, amount, auto: !!auto }); // auto: the computer played it (not counted in player stats)
     if (!res.ok) { console.warn(res.error); return false; }
     loadScenario(scenario); return true;
   }
@@ -956,7 +987,7 @@
       const seat = m.next;
       if (seat === 0 && stopAtHero && !finishStreet) break;
       const a = seat === 0 ? { action: m.toCall[start] > 0 ? 'call' : 'check' } : SC.autoAction(scenario, seat, hand.opps[seat - 1], hand.board.slice(0, BOARD_N[start]));
-      if (!act(a.action, a.amount)) break;
+      if (!act(a.action, a.amount, seat !== 0)) break;
       await sleep(window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320);
     }
     return run === autoRun;
@@ -1111,6 +1142,13 @@
   const stackShown = x => SC.getUnit() === 'bb' ? Math.round(x / scenario.bigBlind * 10) / 10 : x;
   const stackFromInput = v => SC.getUnit() === 'bb' ? v * scenario.bigBlind : v;
   const canActTo = seat => !hand.m.ended && hand.m.frontier <= 3 && hand.m.foldedAt[seat] === null && !heroOut();
+  function statsRow(o) {
+    const b = statsOf(o); if (!b) return '<p class="note sp-stats">Stats: none yet. They build up from the hands you play here (moves the computer makes don\'t count).</p>';
+    const st = SC.styleFromStats(b);
+    const verdict = st ? (o.styleBy === 'stats' && o.style === st ? ` → <b>${esc(st)}</b> (set from the stats)` : ` → points to <b>${esc(st)}</b>`) : ` · a style from ${SC.STATS_MIN} hands`;
+    const use = st && !(o.styleBy === 'stats' && o.style === st) ? `<button type="button" data-sp="usestats">Use stats</button>` : '';
+    return `<div class="sp-row sp-stats"><span class="note">Stats: ${esc(SC.statsLine(b))}${verdict}</span>${use}<button type="button" data-sp="clearstats" title="Forget this player's stats">Clear</button></div>`;
+  }
   function openSeat(seat) {
     seatEdit = seat; document.body.classList.add('is-editing'); const el = $('seatpop'), pos = hand.pos[seat];
     const unitL = SC.getUnit() === 'bb' ? 'BB' : '$';
@@ -1126,6 +1164,7 @@
       <div class="sp-row"><span class="sp-l">Plays</span><div class="sp-chips">${STYLE_CHIPS.map(([v, l]) => `<button type="button" data-sp-style="${v}" class="${!o.range && (o.style || '') === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
       <div class="sp-row"><span class="sp-l">Range</span><div class="sp-chips">${[8, 15, 25, 40].map(p => `<button type="button" data-sp-range="top ${p}%" class="${o.range === `top ${p}%` ? 'on' : ''}">Top ${p}%</button>`).join('')}</div></div>
       <form class="sp-range" data-sp-form><input name="range" value="${esc(o.range || '')}" placeholder="e.g. TT+, AQs+, AKo" aria-label="Range"><button type="submit">Set</button></form>
+      ${statsRow(o)}
       <p class="note">${o.cards ? `Known cards: ${o.cards.map(c => E.cardText(E.cardFromCode(c))).join(' ')}` : `Your read: ${esc(SC.seatRangeLabel(scenario, seat, Math.min(step, 3)))}. The hands are in the panel.`}</p>
       <div class="sp-row sp-btns"><button type="button" data-sp="cards">${o.cards ? 'Change cards' : 'Set their cards'}</button>${o.cards ? '<button type="button" data-sp="unknown">Make unknown</button>' : ''}<button type="button" data-sp="sit" title="Move yourself to this seat's position">Sit here</button></div>
       <div class="sp-row sp-btns">${seatBtns}</div>${stackRow(o.stack)}`;
@@ -1148,6 +1187,8 @@
     if ('spStyle' in b.dataset) { edit('set_opponent', { seat, style: b.dataset.spStyle, range: '' }); return openSeat(seat); }
     if (b.dataset.spRange) { edit('set_opponent', { seat, range: b.dataset.spRange }); return openSeat(seat); }
     if (b.dataset.sp === 'cards') { closeSeat(); return openPicker({ kind: 'opp', seat, i: 0 }); }
+    if (b.dataset.sp === 'usestats') { const o = scenario.opponents[seat - 1], st = SC.styleFromStats(statsOf(o)); if (st) edit('set_opponent', { seat, style: st, range: '', by: 'stats' }); return openSeat(seat); }
+    if (b.dataset.sp === 'clearstats') { const o = scenario.opponents[seat - 1]; delete statsBook[o.name.toLowerCase()]; store.set('walkthrough.players', statsBook); return openSeat(seat); }
     if (b.dataset.sp === 'unknown') { edit('set_opponent', { seat, cards: null }); return openSeat(seat); }
     if (b.dataset.sp === 'sit') { closeSeat(); edit('setup_table', { hero_position: hand.pos[seat] }); }
   });
@@ -1181,9 +1222,8 @@
   //    corrects that card. Cards the AI already confirmed, or that you picked, are never changed: a disagreement there
   //    asks you ("Use the camera's" / "Keep"). Without the on-device reading (another deck or table style) the AI's
   //    reading goes on the table directly. Without a vision model the fast reading is all there is.
-  // 3. Betting (optional, "Read the betting"). The AI also reports who folded, the chips in front of each seat and
-  //    whose turn it is; the missing actions are played in turn order (PokerScenario.followBetting) and kept only if
-  //    they match the picture. Otherwise the betting is left for you to enter.
+  // 3. Following the table live ("Follow the table live", on by default). The AI reads the whole table about every
+  //    second: betting, folds, whose turn it is, the pot, names and stacks, and the table follows it (see below).
   const cam = { stream: null, timer: 0, canvas: null, four: false, seen: [], local: null, localKey: '', localSince: 0, lock: null,
     prevThumb: null, thumbNow: null, asked: null, still: 0, needCheck: false, ai: { busy: false, last: 0, calls: 0, fails: 0, offUntil: 0 },
     conflict: null, ignore: '', betNote: '', betAt: 0, sync: null, synced: false, plan: null, syncMsg: null, syncBusy: false, quality: null, qAt: 0, flash: null };
@@ -1199,7 +1239,6 @@
   // hint = a standing tip ("hold steadier"): it doesn't replace a real update for a few seconds
   function camNote(text, err, hint) { if (hint && Date.now() - (cam.noteAt || 0) < 4000) return; const n = $('camNote'); n.textContent = text; n.classList.toggle('err', !!err); if (!hint) cam.noteAt = Date.now(); }
   const aiReady = () => HV && HV.api.has('vision') && Date.now() > cam.ai.offUntil;
-  const bettingOn = () => aiReady() && $('camBets').checked;
   const STREET_WORD = ['', '', '', 'flop', 'turn', 'river'];
 
   // ----- locking: where each card on the table came from -----
@@ -1289,12 +1328,13 @@
   }
 
   // ----- the AI check (in the background) -----
+  const frameJpeg = q => cam.canvas.toDataURL('image/jpeg', q || 0.85);
   async function readWithAI() {
-    const image = cam.canvas.toDataURL('image/jpeg', 0.85);
-    const a = await HV.api.request('/api/cards/vision', { body: JSON.stringify({ image, betting: bettingOn() }), headers: { 'Content-Type': 'application/json' } });
+    const a = await HV.api.request('/api/cards/vision', { body: JSON.stringify({ image: frameJpeg() }), headers: { 'Content-Type': 'application/json' } });
     cam.ai.calls++; cam.ai.fails = 0;
-    if (!a.hero && !a.board && !a.betting) return null;
-    return { hero: a.hero || null, board: a.board, betting: a.betting || null, unsure: a.unsure || [] };
+    noteRotation(a.rotate);
+    if (!a.hero && !a.board) return null;
+    return { hero: a.hero || null, board: a.board, unsure: a.unsure || [] };
   }
   async function askAI() {
     cam.ai.busy = true; cam.ai.last = Date.now(); cam.asked = cam.thumbNow; cam.needCheck = false; renderCamRead();
@@ -1307,31 +1347,90 @@
         if (!B || !compatible(A, B)) { camNote('The AI wasn\'t sure, so the table stays as it is.'); cam.asked = null; return; }
         A = B;
       }
-      if (bettingOn()) followSeen(A); // before the cards: a new street's board would otherwise settle the last one as calls
       decide(A, 'ai');
-    } catch (e) {
-      cam.ai.fails++;
-      if (e.status === 503 || cam.ai.fails >= 2) cam.ai.offUntil = Date.now() + 30000; // the fast reading carries on alone for a while
-      camNote(`AI check failed (${e.message}). The camera's own reading carries on.`, true);
-    } finally { cam.ai.busy = false; renderCamRead(); }
+    } catch (e) { aiFailed(e); } finally { cam.ai.busy = false; renderCamRead(); }
   }
-  // The betting the AI saw → the missing actions on this table, when (and only when) they add up.
-  function followSeen(A) {
-    if (!cam.synced) { cam.betNote = 'Betting: press ⟳ Sync table first so the seats match the camera.'; return; }
-    const B = A.betting;
-    if (!B || !A.board) { cam.betNote = 'Betting: not clear in the picture. Enter it with the action buttons.'; return; }
-    const pos = SC.positions(scenario), noAction = scenario.streets.every(st => !st.actions.length);
-    if (B.players !== pos.length || B.heroPosition !== pos[0]) {
-      if (!noAction) { cam.betNote = `Betting: the camera shows ${B.players} players with you in ${B.heroPosition}; this table differs, so the betting isn't followed.`; return; }
-      autoRun++; edit('setup_table', { opponents: B.players - 1, hero_position: B.heroPosition }); // match the table at the start of a hand
+  function aiFailed(e) {
+    cam.ai.fails++;
+    if (e.status === 503 || cam.ai.fails >= 3) cam.ai.offUntil = Date.now() + 15000; // the fast reading carries on alone for a while
+    camNote(`AI read failed (${e.message}). The camera's own reading carries on.`, true);
+  }
+  // The AI says the picture is sideways or upside down: two readings in a row agreeing turn every frame upright.
+  function noteRotation(r) {
+    if (!r) { cam.rotVotes = []; return; }
+    cam.rotVotes = (cam.rotVotes || []).concat(r).slice(-2);
+    if (cam.rotVotes.length === 2 && cam.rotVotes[0] === cam.rotVotes[1]) { setRot((cam.rot + r) % 360); cam.rotVotes = []; camNote('The picture was sideways: turned it upright.'); }
+  }
+
+  // ----- following the table live -----
+  // With "Follow the table live" on, the AI reads the whole table about every second (the fast model; up to three
+  // readings in flight, so a new one lands while the next is on its way): every seat's chips in front, folds, whose turn
+  // it is, the pot, names, stacks and the cards. Each reading is applied as it lands, newest wins:
+  //   betting: the missing actions are played in turn order (PokerScenario.trackTable), folds the table had filled in
+  //     as calls are corrected; a reading that contradicts the table is skipped and says why
+  //   seats: names, stacks, the dealer and the number of players follow once two readings in a row agree (the dealer
+  //     and players only between hands; stacks only while the betting matches)
+  //   cards: as with the AI check (a change to cards already on the table needs two readings in a row)
+  const liveOn = () => aiReady() && $('camBets').checked;
+  function pumpLive(pic) {
+    const L = cam.live, now = Date.now();
+    if (L.inflight >= 3 || now - L.lastSent < 450) return;
+    if ((pic.changed && pic.settled) || now - L.lastSent > 2000) askLive();
+  }
+  async function askLive() {
+    const L = cam.live, seq = ++L.seq, t0 = Date.now();
+    L.inflight++; L.lastSent = t0; cam.asked = cam.thumbNow; cam.needCheck = false;
+    try {
+      const T = await HV.api.request('/api/cards/table', { body: JSON.stringify({ image: frameJpeg(0.8), fast: true }), headers: { 'Content-Type': 'application/json' } });
+      cam.ai.calls++; cam.ai.fails = 0;
+      L.ms = L.ms ? L.ms * 0.7 + (Date.now() - t0) * 0.3 : Date.now() - t0;
+      if (seq < L.applied || !cam.stream) return; // a newer reading has already been applied
+      L.applied = seq; L.at = Date.now(); L.reads++;
+      applyLive(T);
+    } catch (e) { aiFailed(e); } finally { L.inflight--; renderCamRead(); }
+  }
+  function applyLive(T) {
+    noteRotation(T.rotate);
+    cam.sync = T;
+    const street = T.readable.cards && T.board ? BOARD_N.indexOf(T.board.length) : Math.max(0, BOARD_N.indexOf(scenario.board.length));
+    const inSync = liveBetting(T, street);
+    if (T.readable.seats) followSeats(T, inSync);
+    if (T.readable.cards && (T.hero || (T.board && T.board.length))) {
+      const A = { hero: T.hero, board: T.board }, p = planFor(A, true), k = readKey(A);
+      if ((p.fixes.length || p.newHand) && cam.live.fixKey !== k) cam.live.fixKey = k; // wait for the next reading to agree
+      else { cam.live.fixKey = ''; decide(A, 'ai'); }
     }
-    const res = SC.followBetting(scenario, B, BOARD_N.indexOf(A.board.length));
-    if (!res.ok) { cam.betNote = `Betting not followed: ${res.error}. Enter it with the action buttons.`; return; }
-    if (!res.log.length) { if (!cam.betNote || /not followed|not clear/.test(cam.betNote)) cam.betNote = 'Betting: up to date.'; return; }
+  }
+  // → true when the table's betting matches the picture
+  function liveBetting(T, street) {
+    if (!T.readable.betting) { cam.betNote = 'Betting: not readable in this picture.'; return false; }
+    if (T.seats.length !== scenario.opponents.length + 1) { cam.betNote = `Betting: waiting for the table to match the camera (${T.seats.length} players on camera).`; return false; }
+    const res = SC.trackTable(scenario, T, street);
+    if (!res.ok) { cam.betNote = `Betting not followed: ${res.error}.`; cam.betBad = (cam.betBad || 0) + 1; return false; }
+    cam.betBad = 0;
+    if (!res.log.length) { if (!cam.betAt || /not /.test(cam.betNote)) cam.betNote = 'Betting: up to date.'; return !res.partial; }
     const had = scenario.streets.map(st => st.actions.length);
     autoRun++; pushUndo(); loadScenario(res.sc); syncLock();
     flashSeats(scenario.streets.flatMap((st, k) => st.actions.slice(had[k]).map(a => a.seat)));
     cam.betNote = `Betting: ${res.log.join(' · ')}.`; cam.betAt = Date.now();
+    return !res.partial;
+  }
+  function followSeats(T, bettingInSync) {
+    const plan = SC.syncPlan(scenario, T);
+    if (!plan.length) { cam.synced = true; cam.live.planKey = ''; cam.seatNote = ''; return; }
+    const fresh = scenario.streets.every(st => st.actions.every(a => a.filled || a.auto));
+    const ids = plan.map(x => x.id).filter(id => id.startsWith('name:') || (id.startsWith('stack:') && (fresh || bettingInSync)) || fresh);
+    const waiting = plan.filter(x => !ids.includes(x.id) && /^(players|dealer|blinds)$/.test(x.id));
+    cam.seatNote = waiting.length ? `The camera shows ${waiting.map(x => x.text.toLowerCase()).join(', ')}: it updates at the next hand (or press Sync table).` : '';
+    if (!ids.length) return;
+    const key = JSON.stringify(plan.filter(x => ids.includes(x.id)));
+    if (key !== cam.live.planKey) { cam.live.planKey = key; return; } // a second reading has to agree
+    cam.live.planKey = '';
+    autoRun++; closePicker(); pushUndo();
+    const done = SC.applySync(scenario, T, ids);
+    loadScenario(scenario); syncLock(); cam.synced = true;
+    flashSeats([0].concat(scenario.opponents.map((_, i) => i + 1)));
+    cam.seatNote = `Table: ${done.join(', ')}.`; cam.seatAt = Date.now();
   }
 
   // ----- Sync table: one careful read of the whole table -----
@@ -1343,7 +1442,7 @@
     const q = cam.quality && !cam.quality.ok ? ` (the picture looks ${cam.quality.issues.join(' and ')}, so this may not work)` : '';
     if (q) camNote(`Reading the whole table…${q}`); $('camSync').disabled = true;
     try {
-      const T = await HV.api.request('/api/cards/table', { body: JSON.stringify({ image: cam.canvas.toDataURL('image/jpeg', 0.9) }), headers: { 'Content-Type': 'application/json' } });
+      const T = await HV.api.request('/api/cards/table', { body: JSON.stringify({ image: frameJpeg(0.9) }), headers: { 'Content-Type': 'application/json' } });
       cam.ai.calls++; cam.sync = T;
       if (!T.readable.seats) { cam.synced = false; cam.syncMsg = { err: true, text: `The camera couldn't read the seats clearly, so everything stays manual${T.problems.length ? `: ${T.problems.join('; ')}` : ''}. Move closer or straighten the camera, then sync again.` }; return; }
       const items = SC.syncPlan(scenario, T);
@@ -1362,9 +1461,12 @@
     cam.syncMsg = { text: done.length ? `Synced: ${done.join(', ')}.` : 'Nothing applied.' };
     renderSyncBox(); renderCamRead();
   }
-  // the cards and the betting from the same reading go the usual way (betting first, as with the AI check)
+  // the betting and the cards from the same reading go the usual way (betting first: a new street's board would
+  // otherwise settle the last one as calls)
   function afterSync(T) {
-    if (bettingOn()) { const B = SC.syncBetting(scenario, T); if (B) followSeen({ board: T.board, betting: B }); }
+    noteRotation(T.rotate);
+    const street = T.readable.cards && T.board ? BOARD_N.indexOf(T.board.length) : Math.max(0, BOARD_N.indexOf(scenario.board.length));
+    if (T.readable.betting) liveBetting(T, street);
     if (T.readable.cards && (T.hero || (T.board && T.board.length))) decide({ hero: T.hero, board: T.board }, 'ai');
   }
   function renderSyncBox() {
@@ -1388,7 +1490,7 @@
     const mark = (label, v, why) => `<span class="${v === true ? 'ok' : v === false ? 'no' : 'un'}"${why ? ` title="${esc(why)}"` : ''}>${label} ${v === true ? '✓' : v === false ? '✗' : '–'}</span>`;
     let html = mark('Picture', Q ? Q.ok : null, Q && Q.issues.join(', '));
     if (ai) html += ['cards', 'seats', 'names', 'stacks', 'betting'].map(k => mark(k[0].toUpperCase() + k.slice(1), T ? T.readable[k] : null)).join('');
-    const why = Q && !Q.ok ? `The picture looks ${Q.issues.join(' and ')}.` : !ai ? '' : !T ? 'Press ⟳ Sync table to check what the camera can read.' : T.problems.length ? `Not readable: ${T.problems.join('; ')}.` : '';
+    const why = Q && !Q.ok ? `The picture looks ${Q.issues.join(' and ')}.` : !ai ? '' : !T ? (liveOn() ? 'Reading the table…' : 'Turn on Follow the table live, or press ⟳ Sync table, to check what the camera can read.') : T.problems.length ? `Not readable: ${T.problems.join('; ')}.` : '';
     if (why) html += `<span class="why">${esc(why)}</span>`;
     $('camReady').innerHTML = html;
   }
@@ -1424,7 +1526,8 @@
     }
     const v = $('camVideo'); v.srcObject = cam.stream; try { await v.play(); } catch (e) {}
     $('camDot').classList.add('on');
-    Object.assign(cam, { seen: [], four: false, local: null, lock: null, asked: null, prevThumb: null, conflict: null, ignore: '', needCheck: false, betNote: '', sync: null, synced: false, plan: null, quality: null });
+    Object.assign(cam, { seen: [], four: false, local: null, lock: null, asked: null, prevThumb: null, conflict: null, ignore: '', needCheck: false, betNote: '', betAt: 0, seatNote: '', sync: null, synced: false, plan: null, quality: null, rotVotes: [],
+      live: { seq: 0, applied: 0, inflight: 0, lastSent: 0, at: 0, reads: 0, ms: 0, planKey: '', fixKey: '' } });
     camNote('Point it at the table so the cards fill most of the picture. Hold steady.');
     renderCamRead(); camLoop();
   }
@@ -1437,14 +1540,20 @@
     if (!cam.stream) return;
     const v = $('camVideo'), t0 = performance.now();
     if (v.videoWidth && !document.hidden) {
-      const k = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight)), W = Math.round(v.videoWidth * k), H = Math.round(v.videoHeight * k);
+      // every frame is turned upright first (cam.rot), so the phone's reader, the AI and the preview all see it upright
+      const k = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight)), sw = Math.round(v.videoWidth * k), sh = Math.round(v.videoHeight * k);
+      const side = cam.rot % 180 !== 0, W = side ? sh : sw, H = side ? sw : sh;
       const c = cam.canvas || (cam.canvas = document.createElement('canvas'));
       if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
-      const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(v, 0, 0, W, H);
+      const g = c.getContext('2d', { willReadFrequently: true });
+      g.save(); g.translate(W / 2, H / 2); g.rotate(cam.rot * Math.PI / 180); g.drawImage(v, -sw / 2, -sh / 2, sw, sh); g.restore();
       const px = g.getImageData(0, 0, W, H).data;
       let r = null; try { r = CardVision.analyze(px, W, H, { fourColor: cam.four }); } catch (e) { console.warn(e); }
       if (r && r.fourColor && !cam.four) cam.four = true; // the screen being filmed uses a four-colour deck: suits are read by colour
-      if (r) { drawCamOverlay(r); onFrame(r, updateThumb(px, W, H)); }
+      cam.last = r;
+      drawPreview($('camPrev'), r);
+      if (!$('camFull').hidden) drawPreview($('camFullCv'), r);
+      if (r) onFrame(r, updateThumb(px, W, H));
       if (Date.now() - cam.qAt > 1000) { cam.qAt = Date.now(); cam.quality = pictureCheck(px, W, H, r); }
     }
     cam.timer = setTimeout(camLoop, Math.max(30, 120 - (performance.now() - t0)));
@@ -1466,7 +1575,8 @@
     } else if (!usable && !cam.ai.busy) camNote(aiReady() ? 'Reading with the AI…' : r.cards.length ? 'Some cards aren\'t clear yet: move a little closer or hold steadier.' : 'Point it at the table so the cards fill most of the picture.', false, true);
     // the AI looks when the fast reading put something new on the table, or the picture changed in a way the fast
     // reading can't vouch for (it can't read these cards, or the betting is being followed)
-    if (aiReady() && !cam.ai.busy && Date.now() - cam.ai.last > 1200 && pic.settled && (cam.needCheck || (pic.changed && (bettingOn() || !steady || unverified())))) askAI();
+    if (liveOn()) pumpLive(pic);
+    else if (aiReady() && !cam.ai.busy && Date.now() - cam.ai.last > 1200 && pic.settled && (cam.needCheck || (pic.changed && (!steady || unverified())))) askAI();
     renderCamRead();
   }
   // Locked cards (⋯ = AI check pending, ✓ = confirmed), the betting the camera followed, and any disagreement.
@@ -1475,8 +1585,18 @@
     const lh = lockedHero(), lb = lockedBoard(), ai = aiReady();
     const mark = srcs => (!ai ? '' : srcs.some(x => x === 'fast') ? ' <span class="note" title="AI check pending">⋯</span>' : srcs.length ? ' <span class="cam-ok" title="Confirmed">✓</span>' : '');
     let html = `<span><b>You</b>${lh ? `🔒 ${esc(cardsTxt(lh))}${mark([cam.lock.hero])}` : '<span class="note">waiting</span>'}</span><span><b>Board</b>${lb.length ? `🔒 ${esc(cardsTxt(lb))}${mark(cam.lock.board)}` : '<span class="note">none yet</span>'}</span>`;
-    html += `<span class="note cam-ai">${ai ? `AI check · ${cam.ai.calls} call${cam.ai.calls === 1 ? '' : 's'}` : HV && HV.api.has('vision') ? 'AI check paused' : 'On-device only'}${cam.ai.busy ? ' · checking…' : ''}</span>`;
-    if (bettingOn() && cam.betNote) html += `<span class="note cam-bet">${esc(cam.betNote)}${cam.betAt ? ` <span title="When the camera last changed the betting">· ${Math.round((Date.now() - cam.betAt) / 1000)} s ago</span>` : ''}</span>`;
+    const L = cam.live || {};
+    if (liveOn()) {
+      const ago = L.at ? `${((Date.now() - L.at) / 1000).toFixed(1)} s ago` : 'starting…';
+      html += `<span class="note cam-ai" title="How fresh the table is: when the last reading landed, and how long a reading takes">Live · read ${ago} · ${L.ms ? (L.ms / 1000).toFixed(1) + ' s per read' : '…'} · ${cam.ai.calls} reads${L.inflight ? ` · ${L.inflight} on the way` : ''}</span>`;
+      const T = cam.sync, k = T && T.unit === 'bb' ? scenario.bigBlind : 1, potT = hand.m.potShow[Math.min(hand.m.frontier, 3)];
+      const row = [];
+      if (T && T.pot) row.push(Math.abs(T.pot * k - potT) < 0.01 * Math.max(1, scenario.bigBlind) + 1e-9 ? `<span class="ok">Pot ${money(potT)} ✓</span>` : `<span class="no" title="The pot the camera sees doesn't match this table's: some betting may be missing">Pot: camera ${money(T.pot * k)} · table ${money(potT)}</span>`);
+      if (T && T.toAct !== null && T.seats[T.toAct]) row.push(`<span>To act: ${esc(T.toAct === 0 ? 'you' : T.seats[T.toAct].name || hand.pos[T.toAct] || 'seat ' + T.toAct)}${hand.m.next === T.toAct ? ' <span class="ok">✓</span>' : ''}</span>`);
+      if (cam.betNote) row.push(`<span>${esc(cam.betNote)}${cam.betAt ? ` · ${Math.round((Date.now() - cam.betAt) / 1000)} s ago` : ''}</span>`);
+      if (cam.seatNote) row.push(`<span>${esc(cam.seatNote)}</span>`);
+      html += `<div class="cam-live-row">${row.join('')}</div>`;
+    } else html += `<span class="note cam-ai">${ai ? `AI check · ${cam.ai.calls} call${cam.ai.calls === 1 ? '' : 's'}` : HV && HV.api.has('vision') ? 'AI check paused' : 'On-device only'}${cam.ai.busy ? ' · checking…' : ''}</span>`;
     if (cam.conflict) {
       const c = cam.conflict;
       html += `<div class="cam-conflict">The camera reads ${c.kind === 'hero' ? 'your cards' : 'the board'} as <b>${esc(cardsTxt(c.cards))}</b>; the table has ${esc(cardsTxt(c.was))}. <span class="cam-btns"><button type="button" data-cam="use">Use the camera's</button><button type="button" data-cam="keep">Keep</button></span></div>`;
@@ -1494,15 +1614,20 @@
     camNote('Updated from the camera.'); renderCamRead();
   });
   $('camReread').addEventListener('click', () => { syncLock(); cam.lock.hero = null; cam.lock.board = []; cam.conflict = null; cam.ignore = ''; cam.asked = null; cam.localKey = ''; cam.seen = []; camNote('Reading the table again…'); renderCamRead(); });
-  $('camBets').checked = !!store.get('walkthrough.camBets');
-  $('camBets').addEventListener('change', () => { store.set('walkthrough.camBets', $('camBets').checked); cam.betNote = cam.synced ? '' : 'Betting: press ⟳ Sync table first so the seats match the camera.'; cam.betAt = 0; cam.asked = null; renderCamRead(); });
-  // Boxes over the preview: gold = your cards, green = the board, grey = other cards, dashed = not sure yet.
-  function drawCamOverlay(r) {
-    if ($('camBody').classList.contains('folded')) return;
-    const cv = $('camOverlay'), box = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
-    cv.width = Math.round(box.width * dpr); cv.height = Math.round(box.height * dpr);
-    const g = cv.getContext('2d'); g.clearRect(0, 0, cv.width, cv.height);
-    const s = Math.min(cv.width / r.width, cv.height / r.height), ox = (cv.width - r.width * s) / 2, oy = (cv.height - r.height * s) / 2;
+  $('camBets').checked = store.get('walkthrough.camBets') !== false; // on unless you turned it off
+  $('camBets').addEventListener('change', () => { store.set('walkthrough.camBets', $('camBets').checked); cam.betNote = ''; cam.betAt = 0; cam.asked = null; renderCamRead(); });
+  // The upright picture with boxes over it: gold = your cards, green = the board, grey = other cards, dashed = not sure yet.
+  function drawPreview(cv, r) {
+    if (!cam.canvas || (cv.id === 'camPrev' && $('camBody').classList.contains('folded'))) return;
+    const box = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    if (!box.width) return;
+    const w = Math.round(box.width * dpr), h = Math.round(box.height * dpr);
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    const g = cv.getContext('2d'), src = cam.canvas;
+    g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+    const s = Math.min(w / src.width, h / src.height), ox = (w - src.width * s) / 2, oy = (h - src.height * s) / 2;
+    g.drawImage(src, ox, oy, src.width * s, src.height * s);
+    if (!r) return;
     const P = (x, y) => [ox + x * s, oy + y * s];
     g.lineWidth = 2 * dpr; g.font = `600 ${12 * dpr}px "IBM Plex Mono", monospace`;
     for (const c of r.cards) {
@@ -1516,6 +1641,15 @@
       g.fillStyle = col; g.fillText(label, tx + 4 * dpr, ty - 4 * dpr);
     }
   }
+  // Which way up: turned automatically when the AI sees it sideways, or by hand with ↻. Remembered on this device.
+  cam.rot = [0, 90, 180, 270].includes(store.get('walkthrough.camRot')) ? store.get('walkthrough.camRot') : 0;
+  function setRot(r) { cam.rot = r; store.set('walkthrough.camRot', r); cam.prevThumb = null; cam.asked = null; cam.seen = []; cam.localKey = ''; }
+  const turn = e => { e.stopPropagation(); setRot((cam.rot + 90) % 360); camNote(`Turned the picture a quarter turn.`); };
+  $('camRot').addEventListener('click', turn);
+  $('camFullRot').addEventListener('click', turn);
+  $('camView').addEventListener('click', () => { $('camFull').hidden = false; drawPreview($('camFullCv'), cam.last); });
+  $('camFullX').addEventListener('click', () => { $('camFull').hidden = true; });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('camFull').hidden) $('camFull').hidden = true; });
   $('camBtn').addEventListener('click', () => (cam.stream ? stopCamera() : startCamera()));
   $('camClose').addEventListener('click', stopCamera);
   // Hide or show the camera's picture; the reading carries on either way.
@@ -1771,7 +1905,14 @@
     return `<section class="blk advice ${cls}"><h3 title="A rule of thumb, not a solver">What you should do</h3>
       <div class="adv-top"><span class="adv-act">${esc(r.label)}</span>${size ? `<span class="adv-size">${size}</span>` : ''}${r.close ? '<span class="chip">close call</span>' : ''}</div>
       <div class="gauge" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${r.gauge}" aria-label="Recommendation strength from fold to raise"><span>Fold</span><span>Check · Call</span><span>Bet · Raise</span><i style="left:${r.gauge}%"></i></div>
+      ${r.ev ? evList(r.ev) : ''}
       <ul class="adv-why">${r.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>${r.note ? `<p class="note">${esc(r.note)}</p>` : ''}${handLine(S)}</section>`;
+  }
+  // What each choice is worth (chips you can expect to win or lose from here), best first.
+  function evList(ev) {
+    const name = o => o.key === 'fold' ? 'Fold' : o.key === 'check' ? 'Check' : o.key === 'call' ? `Call ${money(o.add)}` : o.allIn ? `All-in ${money(o.to)}` : o.key === 'bet' ? `Bet ${money(o.add)} <span class="note">${Math.round(o.potShare * 100)}%</span>` : `Raise to ${money(o.to)}`;
+    const top = Math.max(...ev.map(o => Math.abs(o.ev)), 1e-9);
+    return `<div class="evl" title="What each choice is worth on average: the chips you can expect to win (+) or lose (−) from here, against their likely hands and how they tend to answer">${ev.slice(0, 5).map((o, i) => `<div class="evr${i === 0 ? ' best' : ''}"><span class="evn">${i === 0 ? '★ ' : ''}${name(o)}</span><span class="evb"><i class="${o.ev < 0 ? 'neg' : ''}" style="width:${Math.max(2, Math.abs(o.ev) / top * 100)}%"></i></span><span class="evv">${o.ev >= 0 ? '+' : '−'}${money(Math.abs(o.ev))}</span></div>`).join('')}</div>`;
   }
   function rangeList(s) {
     const seats = liveSeats(s); if (!seats.length) return '';
@@ -1804,7 +1945,8 @@
   // Under "Start camera": the hand number and how the last hand went.
   function renderDockInfo() {
     const last = lastResult && lastResult.hand === scenario.handNo - 1 ? ` · last hand: ${esc(lastResult.text)}${lastResult.net ? ` (you ${lastResult.net > 0 ? '+' : '−'}${money(Math.abs(lastResult.net))})` : ''}` : '';
-    $('dockInfo').innerHTML = `<b>Hand ${scenario.handNo}</b>${last}`;
+    const sty = lastResult && lastResult.hand === scenario.handNo - 1 && lastResult.styles ? ` · from their stats: ${esc(lastResult.styles.join(', '))}` : '';
+    $('dockInfo').innerHTML = `<b>Hand ${scenario.handNo}</b>${last}${sty}`;
   }
   function waitingBlock() {
     const last = lastResult && lastResult.hand === scenario.handNo - 1 ? `<p class="note">Last hand: ${esc(lastResult.text)}${lastResult.net ? ` (you ${lastResult.net > 0 ? '+' : '−'}${money(Math.abs(lastResult.net))})` : ''}.</p>` : '';
@@ -1936,6 +2078,7 @@
     const folded = m.foldedAt[seat] !== null && m.foldedAt[seat] <= s3;
     let html = `<section class="blk"><h3 title="Built only from what you can see: their seat, the style you gave them, how they've bet, the board and your own cards. Their actual cards are never used.">Your read on ${esc(o.name)} <small>${esc(hand.pos[seat])} · ${STEP[step].toLowerCase()}</small></h3>
 `;
+    if (statsOf(o)) html += `<p class="note">Stats: ${esc(SC.statsLine(statsOf(o)))}${o.style ? ` · playing them as ${esc(o.style)}${o.styleBy === 'stats' ? ' (from the stats)' : ''}` : ''}</p>`;
     if (r.kind === 'known') { html += `<p>You set their cards: ${miniCards(o.cards.map(E.cardFromCode))}</p></section>`; return html; }
     // your hand against this read (heads-up)
     let eqTxt = '';

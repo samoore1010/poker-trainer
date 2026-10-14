@@ -353,6 +353,7 @@
     const pos = ctx.inPosition ? 'in position' : 'out of position';
     reasons.push(`You win ${fmt(win)}% ${live > 1 ? `against ${live} opponents` : 'against your opponent'}${ctx.rangesSet ? ' (given their likely hands)' : ''}.`);
     if (ctx.aggressor === 'hero') { reasons.push(`You bet ${F(ctx.bet)}; the stats assume they call.`); return out('wait', clamp01(win / 100)); }
+    if (ctx.ev && ctx.ev.best) return fromEV(ctx, ctx.ev, out, reasons, F, made, draw);
     if (ctx.toCall > 0) {
       // Equity you actually get to use: out of position you often can't see the next card or get paid when you hit.
       const realize = river || ctx.inPosition ? 1 : street === 1 ? 0.8 : 0.9, eff = win * realize;
@@ -393,6 +394,30 @@
     }
     reasons.push(`Not strong enough to bet${live > 1 ? ` into ${live} players` : ''}; check and see what they do${ctx.inPosition ? '' : ''}.`);
     return out('check', clamp01(win / valueAt));
+  }
+
+  // The choice worth the most chips (ev.js), in words: what it's worth, the next best, how often they fold or come back.
+  function fromEV(ctx, ev, out, reasons, F, made, draw) {
+    const best = ev.best, P = ctx.pot, sign = x => (x >= 0 ? '+' : '−') + F(Math.abs(Math.round(x * 100) / 100));
+    const name = o => o.key === 'fold' ? 'folding' : o.key === 'check' ? 'checking' : o.key === 'call' ? `calling ${F(o.add)}` : o.allIn ? `all-in (${F(o.to)})` : o.key === 'bet' ? `betting ${F(o.add)} (${Math.round(o.potShare * 100)}% of the pot)` : `raising to ${F(o.to)}`;
+    const hand = cap(made.text.replace(/<[^>]+>/g, '')) + (draw.outs >= 8 && ctx.street < 3 ? `, with a ${draw.label} (${draw.outs} cards)` : '');
+    reasons.push(`${hand}.`);
+    reasons.push(best.key === 'fold' ? `Folding is best: every other choice loses chips on average.` : `${cap(name(best))} is worth the most: about ${sign(best.ev)} from here.`);
+    const next = ev.options.find(o => o !== best && (o.key !== best.key || best.key === 'bet' || best.key === 'raise'));
+    if (next) reasons.push(`Next best: ${name(next)} (${sign(next.ev)}).`);
+    if (best.key === 'bet' || best.key === 'raise') {
+      if (best.folds > 0.05) reasons.push(`They fold about ${Math.round(best.folds * 100)}% of the time${best.folds > 0.5 ? ': much of the value is winning the pot right away' : ''}.`);
+      if (best.reraised > 0.08) reasons.push(`They come back over the top about ${Math.round(best.reraised * 100)}% of the time; you'd ${best.callReraise ? 'call' : 'fold'}.`);
+    }
+    if (best.key === 'check' && best.note) reasons.push(`After checking, ${best.note}.`);
+    if (ev.close) reasons.push('A close decision: the choices are within a few percent of the pot.');
+    const zone = { fold: 0, check: 1, call: 1, bet: 2, raise: 2 }[best.key];
+    const margin = next ? (best.ev - next.ev) / Math.max(P, 1) : 0.3;
+    const o = { close: ev.close };
+    if (best.key === 'bet' || best.key === 'raise') { o.size = best.to; o.sizeText = best.allIn ? `all-in ${F(best.to)}` : best.key === 'bet' ? `${F(best.add)} (about ${Math.round(best.potShare * 100)}% of the pot)` : `to ${F(best.to)}`; }
+    const r = out(best.key, clamp01(zone === 0 ? 1 - margin * 3 : 0.35 + margin * 2), o);
+    r.ev = ev.options.map(x => ({ key: x.key, label: x.label, to: x.to || null, add: x.add || 0, ev: Math.round(x.ev * 100) / 100, potShare: x.potShare || null, allIn: !!x.allIn }));
+    return r;
   }
 
   return {
