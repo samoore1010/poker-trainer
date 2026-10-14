@@ -240,3 +240,28 @@ test('vision: the short live reading becomes the same seats shape, and is strict
   assert.equal(normalizeLive({ ok: true, cards_ok: true, bets: [2, 5], folded: [false], to_act: 0, pot: 0, board: [], hero: [] }).readable.betting, false); // lengths differ
   assert.equal(normalizeLive({ ok: false, cards_ok: false, bets: [2, 5], folded: [false, false], to_act: 9, pot: 0, board: ['Ah'], hero: [] }).toAct, null);
 });
+
+test('vision: replies parse even when wrapped, and live reads leave room for the answer', async () => {
+  const { parseJson, createVision } = require('../server/vision');
+  assert.deepEqual(parseJson('{"a":1}'), { a: 1 });
+  assert.deepEqual(parseJson('```json\n{"a":1}\n```'), { a: 1 });
+  assert.equal(parseJson('{"a":'), null);
+  // a stand-in Anthropic API: records each request, answers with thinking used up and no text
+  const http = require('http'), bodies = [];
+  const srv = http.createServer((req, res) => {
+    let b = ''; req.on('data', d => { b += d; }); req.on('end', () => {
+      bodies.push(JSON.parse(b));
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ id: 'm', type: 'message', role: 'assistant', model: 'x', content: [{ type: 'thinking', thinking: '', signature: 's' }], stop_reason: 'max_tokens', usage: { input_tokens: 1, output_tokens: 1 } }));
+    });
+  });
+  await new Promise(r => srv.listen(0, r));
+  const warn = console.warn; console.warn = () => {};
+  try {
+    const v = createVision({ vision: {}, agent: { anthropicKey: 'k', anthropicBaseUrl: `http://127.0.0.1:${srv.address().port}` } }, { configured: false });
+    await assert.rejects(v.readLive({ data: 'AA==', mime: 'image/jpeg', seats: 6 }), e => e.code === 'llm_truncated');
+    assert.ok(bodies[0].max_tokens >= 4000); assert.deepEqual(bodies[0].thinking, { type: 'disabled' });
+    await assert.rejects(v.readTable({ data: 'AA==', mime: 'image/jpeg', fast: false }), e => e.code === 'llm_truncated');
+    assert.ok(bodies[1].max_tokens >= 16000); assert.equal(bodies[1].thinking, undefined);
+  } finally { console.warn = warn; srv.close(); }
+});
