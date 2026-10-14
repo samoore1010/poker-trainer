@@ -137,13 +137,13 @@ function tablePrompt(player) {
   ].join('\n');
 }
 const TABLE_PLAYER = 'the player nearest the camera at the bottom centre (in the Hand Walkthrough app, the name plate "You")';
-function livePrompt(player, seats) {
+function livePrompt(player, seats, cards = true) {
   return [
     'You follow a poker hand in a photo of a table (a real table or a poker app on a screen), as fast as possible.',
     `Seats in order: the followed player (${player}) first, then clockwise (on the picture: up the left side, across the top, down the right side)${seats ? `; there should be ${seats} seats` : ''}.`,
-    'Per seat: the chips in front of it on this street, and whether it has folded. Then whose turn it is (highlighted seat, timer bar), the pot as shown, and the face-up cards (codes: rank then suit, e.g. Ah, Td).',
+    `Per seat: the chips in front of it on this street, and whether it has folded. Then whose turn it is (highlighted seat, timer bar)${cards ? ', the pot as shown, and the face-up cards (codes: rank then suit, e.g. Ah, Td)' : ' and the pot as shown. Leave board and hero empty and cards_ok false: the cards are read elsewhere'}.`,
     'The picture may be sideways: read it upright and say in rotate how far to turn it clockwise.',
-    'board: the face-up row in the middle by the pot (0, 3, 4 or 5 cards). hero: the two face-up cards beside the followed player\'s plate, never cards from the middle row. Card backs are nobody\'s board.',
+    ...(cards ? ['board: the face-up row in the middle by the pot (0, 3, 4 or 5 cards). hero: the two face-up cards beside the followed player\'s plate, never cards from the middle row. Card backs are nobody\'s board.'] : []),
     'A bet is the chips or amount between a player and the middle, and belongs to the nearest player.',
     'Never guess: set ok or cards_ok to false if you cannot read that part clearly, or cannot tell board cards from the player\'s.',
   ].join('\n');
@@ -253,8 +253,8 @@ function createVision(config, openai) {
       readTable({ data, mime, player, fast }) {
         return ask({ data, mime, model: fast ? liveModel : syncModel, system: tablePrompt(player || TABLE_PLAYER), schema: TABLE_SCHEMA, text: 'Read the whole table, seat by seat.', effort: fast ? 'low' : 'medium', quick: fast });
       },
-      readLive({ data, mime, player, seats }) {
-        return ask({ data, mime, model: liveModel, system: livePrompt(player || TABLE_PLAYER, seats), schema: LIVE_SCHEMA, text: 'Bets, folds, whose turn, pot, cards.', effort: 'low', quick: true });
+      readLive({ data, mime, player, seats, cards }) {
+        return ask({ data, mime, model: liveModel, system: livePrompt(player || TABLE_PLAYER, seats, cards), schema: LIVE_SCHEMA, text: 'Bets, folds, whose turn, pot, cards.', effort: 'low', quick: true });
       },
     };
     // Thinking counts against max_tokens: a tight cap ends the answer before the JSON is written. Live reads turn
@@ -296,7 +296,7 @@ function createVision(config, openai) {
       name: 'openai', model, syncModel, liveModel,
       read({ data, mime, player, betting }) { return ask({ data, mime, model, system: prompt(player || DEFAULT_PLAYER, betting), schema: betting ? BETTING_SCHEMA : SCHEMA, name: 'cards', text: 'Read the board and the player\'s cards.' }); },
       readTable({ data, mime, player, fast }) { return ask({ data, mime, model: fast ? liveModel : syncModel, system: tablePrompt(player || TABLE_PLAYER), schema: TABLE_SCHEMA, name: 'table', text: 'Read the whole table, seat by seat.' }); },
-      readLive({ data, mime, player, seats }) { return ask({ data, mime, model: liveModel, system: livePrompt(player || TABLE_PLAYER, seats), schema: LIVE_SCHEMA, name: 'live', text: 'Bets, folds, whose turn, pot, cards.' }); },
+      readLive({ data, mime, player, seats, cards }) { return ask({ data, mime, model: liveModel, system: livePrompt(player || TABLE_PLAYER, seats, cards), schema: LIVE_SCHEMA, name: 'live', text: 'Bets, folds, whose turn, pot, cards.' }); },
     };
     async function ask({ data, mime, model, system, schema, name, text: say }) {
       const res = await openai.responses({
