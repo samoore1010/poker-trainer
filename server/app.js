@@ -39,6 +39,7 @@ const safeEqual = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(
 function createApp(config, { fetchImpl, log = line => console.log(JSON.stringify(line)) } = {}) {
   const openai = createOpenAI(config.openai, { fetchImpl, log });
   const limiter = createRateLimiter({ perMinute: config.rateLimitPerMin });
+  const cameraLimiter = createRateLimiter({ perMinute: config.cameraRateLimitPerMin });
   const router = createRouter();
   const ctx = { config, openai, log, agent: createAgent(config, openai), vision: createVision(config, openai) };
   routeModules.forEach(register => register(router, ctx));
@@ -85,7 +86,7 @@ function createApp(config, { fetchImpl, log = line => console.log(JSON.stringify
       }
       if (route.opts.metered) {
         if (config.accessCode && !safeEqual(req.headers['x-access-code'] || '', config.accessCode)) throw new HttpError(401, 'access_code_required', 'Enter the access code to use voice features.');
-        const wait = limiter.take(clientIp(req));
+        const wait = (route.opts.metered === 'camera' ? cameraLimiter : limiter).take(clientIp(req));
         if (wait) throw new HttpError(429, 'rate_limited', `Too many requests. Try again in ${wait}s.`, { retryAfter: wait });
       }
       const send = { json: (status, body) => sendJson(res, status, body), text: (status, body) => { res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(body); } };

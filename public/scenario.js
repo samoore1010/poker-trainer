@@ -103,7 +103,7 @@
     const TYPES = ['fold', 'check', 'call', 'bet', 'raise'];
     sc.streets = [0, 1, 2, 3].map(s => {
       const st = streets[s] && typeof streets[s] === 'object' ? streets[s] : {};
-      const actions = (Array.isArray(st.actions) ? st.actions : []).filter(a => a && TYPES.includes(a.type)).map(a => ({ seat: Math.round(num(a.seat, -1)), type: a.type, to: Math.max(0, num(a.to, 0)), ...(a.auto ? { auto: true } : {}) })).filter(a => a.seat >= 0 && a.seat <= n);
+      const actions = (Array.isArray(st.actions) ? st.actions : []).filter(a => a && TYPES.includes(a.type)).map(a => ({ seat: Math.round(num(a.seat, -1)), type: a.type, to: Math.max(0, num(a.to, 0)), ...(a.auto ? { auto: true } : {}), ...(a.filled ? { filled: true } : {}) })).filter(a => a.seat >= 0 && a.seat <= n);
       const plan = st.plan && Array.isArray(st.plan.folds) ? { folds: st.plan.folds.map(x => Math.round(num(x, -1))).filter(x => x >= 1 && x <= n) } : undefined;
       return plan ? { actions, plan } : { actions };
     });
@@ -498,7 +498,7 @@
     for (let guard = 0; guard < 40; guard++) {
       const m = money(sc); if (m.ended || m.frontier !== s) return;
       const snap = m.street[s]; if (!snap || snap.complete) return;
-      sc.streets[s].actions.push({ seat: snap.next, type: snap.max > snap.contrib[snap.next] ? 'call' : 'check', to: 0 });
+      sc.streets[s].actions.push({ seat: snap.next, type: snap.max > snap.contrib[snap.next] ? 'call' : 'check', to: 0, filled: true }); // filled in, not seen
     }
   }
   function scriptStreet(sc, s, { aggressor, amount, folds }, opts = {}) {
@@ -910,6 +910,60 @@
     return { players: pos.length, heroPosition: pos[0], toAct: T.toAct === null ? null : pos[T.toAct], unit: T.unit, seats };
   }
 
+  // ----- following the table live (the camera's whole-table readings) -----
+  // T: a whole-table reading (seats from you, clockwise; bet in front, folded, latest action, whose turn). street: the
+  // street the picture shows. On a copy: players who were filled in as calling an earlier street but are shown folded
+  // become folds; earlier streets are finished (folded players fold, the rest check or call); then on this street each
+  // player goes to the chips in front of them, in turn order, until it's the shown player's turn. A seat whose chips
+  // don't add up stops the replay there (what came before is kept). → {ok, sc, log, partial} or {ok: false, error}
+  function trackTable(sc, T, street) {
+    const w = clone(sc), players = w.opponents.length + 1, log = [];
+    if (!T || !T.seats || T.seats.length !== players) return { ok: false, error: `the camera shows ${T && T.seats ? T.seats.length : 0} players, this table has ${players}` };
+    const k = T.unit === 'bb' ? w.bigBlind : 1, seen = T.seats.map(x => ({ ...x, bet: x.bet * k }));
+    const near = (a, b) => Math.abs(a - b) < 0.01 * Math.max(1, w.bigBlind) + 1e-9;
+    // folds the camera saw that the table filled in as calls
+    let repaired = false;
+    seen.forEach((x, seat) => {
+      if (!x.folded) return;
+      const m0 = money(w); if (m0.foldedAt[seat] !== null) return;
+      for (let s = 0; s < Math.min(street, 4); s++) {
+        const acts = w.streets[s].actions, mine = acts.filter(a => a.seat === seat);
+        if (!mine.length || !mine.every(a => a.filled)) continue;
+        const i = acts.indexOf(mine[0]); acts[i] = { seat, type: 'fold', to: 0 };
+        for (let j = acts.length - 1; j > i; j--) if (acts[j].seat === seat) acts.splice(j, 1);
+        for (let t = s + 1; t < 4; t++) w.streets[t].actions = w.streets[t].actions.filter(a => a.seat !== seat);
+        repaired = true; log.push(`${seatName(w, seat)} folded on the ${STREETS[s]}`); break;
+      }
+    });
+    if (repaired && replay(w).dropped) return { ok: false, error: 'the earlier betting no longer adds up' };
+    const act = (seat, action, amount) => { const r = apply(w, 'act', { seat, action, amount }); if (r.ok) log.push(r.summary.replace(/^\w+: /, '')); return r.ok; };
+    let partial = false;
+    for (let guard = 0; guard < 80; guard++) {
+      const m = money(w);
+      if (m.ended || m.frontier > street || m.next === null) break;
+      const s = m.frontier, snap = m.street[s], seat = m.next, x = seen[seat];
+      if (s < street) { if (!act(seat, x.folded ? 'fold' : snap.max > snap.contrib[seat] ? 'call' : 'check')) { partial = true; break; } continue; }
+      if (T.toAct === seat) break; // their turn now
+      if (T.toAct === null && (x.last === 'none' || x.last === 'post') && !x.folded) break; // not acted yet
+      if (x.folded) { if (!act(seat, 'fold')) { partial = true; break; } continue; }
+      if (x.bet > snap.max && !near(x.bet, snap.max)) { if (!act(seat, snap.max > 0 ? 'raise' : 'bet', x.bet)) { partial = true; break; } continue; }
+      if (near(x.bet, snap.max) || (x.stack === 0 && x.bet > snap.contrib[seat])) { if (!act(seat, snap.max > snap.contrib[seat] ? 'call' : 'check')) { partial = true; break; } continue; }
+      partial = true; break; // fewer chips in than the bet and not all-in: not acted yet, or a misread; stop here
+    }
+    // the result must agree with the picture where both say something
+    const m = money(w);
+    if (!m.ended && m.frontier === street && !partial) {
+      const snap = m.street[street];
+      for (let seat = 0; seat < players; seat++) {
+        const x = seen[seat];
+        if (x.folded && m.foldedAt[seat] === null) return { ok: false, error: `${seatName(w, seat)} is shown folded but works out still in` };
+        if (!x.folded && m.foldedAt[seat] !== null && m.foldedAt[seat] <= street) return { ok: false, error: `${seatName(w, seat)} is shown in the hand but works out folded` };
+      }
+      if (T.toAct !== null && m.next !== null && m.next !== T.toAct) return { ok: false, error: `it should be ${seatName(w, T.toAct)}'s turn but works out to ${seatName(w, m.next)}'s` };
+    }
+    return { ok: true, sc: w, log, partial };
+  }
+
   // ----- following the betting a camera saw -----
   // seen: {players, heroPosition, toAct, unit, seats: {POS: {folded, bet (chips in on this street), last}}}; street = the
   // street the picture shows (0 preflop … 3 river). On a copy, plays the actions this table is missing, in turn order:
@@ -1098,5 +1152,5 @@
     };
   }
 
-  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, readOf, engineOpponent, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, followBetting, settleHand, syncPlan, applySync, syncBetting, handStats, addStats, styleFromStats, statsLine, applyStats, STATS_MIN, setUnit, getUnit, fmt };
+  return { STREETS, BOARD_N, NAMES, POS, POS_NAMES, create, normalize, positions, seatOfPosition, blindOf, money, replay, choices, orders, viewLimit, completeStreet, autoAction, liveOpponents, engineOpponents, effRange, rangeLabel, inferredRanges, likelyRange, seatRangeLabel, readOf, engineOpponent, preflopCtx, apply, ops: Object.keys(ops), summary, clone, prettyList, seatFrom, seatName, recommendation, followBetting, trackTable, settleHand, syncPlan, applySync, syncBetting, handStats, addStats, styleFromStats, statsLine, applyStats, STATS_MIN, setUnit, getUnit, fmt };
 });
