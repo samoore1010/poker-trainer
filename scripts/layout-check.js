@@ -2,7 +2,7 @@
 'use strict';
 // Checks the phone table for overlaps: for 1–8 opponents at common phone sizes, no seat (its speech bubble, avatar,
 // cards and name plate), bet, dealer button, the pot, the board or your cards may overlap another, or leave the screen.
-// Worst cases are forced: every bubble reads "Raises to $150", every seat has a four-chip bet.
+// Worst cases are forced: every bubble reads "Raises to $150", every seat shows the FOLDED tag and a four-chip bet.
 //   npm run layout -- [url] [WxH,WxH,...]     (needs Playwright: npm i -D playwright, or a global install)
 let chromium;
 try { ({ chromium } = require('playwright')); } catch (e) { console.error('This check needs Playwright (npm i -D playwright).'); process.exit(2); }
@@ -23,6 +23,8 @@ const sizes = (process.argv[3] || '360x740,375x667,390x844,414x896,430x932').spl
         const box = e => { const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; };
         const seats = [...document.querySelectorAll('.seat')];
         seats.forEach(s => { const a = s.querySelector('.act'); a.className = 'act bet'; a.textContent = 'Raises to $150'; });
+        // and every seat folded too: the FOLDED tag on the avatar
+        seats.forEach(s => { if (!s.querySelector('.fold-tag')) { const t = document.createElement('div'); t.className = 'fold-tag layout-probe'; t.textContent = 'Folded'; s.querySelector('.pic').appendChild(t); } });
         const ha = document.getElementById('heroAct'); ha.className = 'act you'; ha.textContent = 'Your turn · $150 to call';
         const probe = (pos, html, cls) => { const e = document.createElement('div'); e.className = cls + ' layout-probe'; e.innerHTML = html; e.style.left = pos.x + '%'; e.style.top = pos.y + '%'; tb.appendChild(e); return e; };
         const chips = '<span class="chips-stack" style="--n:3">' + '<i style="--k:0"></i><i style="--k:1"></i><i style="--k:2"></i><i style="--k:3"></i></span><b>$150</b>';
@@ -30,7 +32,7 @@ const sizes = (process.argv[3] || '360x740,375x667,390x844,414x896,430x932').spl
           out.push({ k: 'bet' + i, ...box(probe(L.betPos(i), chips, 'chipbet')) });
           out.push({ k: 'dealer' + i, ...box(probe(L.dealerPos(i), 'D', 'dealer')) });
         }
-        seats.forEach(s => { for (const part of [s.querySelector('.act'), s.querySelector('.pic'), s.querySelector('.plate'), ...s.querySelectorAll('.cards .card')]) out.push({ k: 'seat' + s.dataset.seat, ...box(part) }); });
+        seats.forEach(s => { for (const part of [s.querySelector('.act'), s.querySelector('.pic'), s.querySelector('.plate'), s.querySelector('.fold-tag'), ...s.querySelectorAll('.cards .card')]) out.push({ k: 'seat' + s.dataset.seat, ...box(part) }); });
         const hero = document.getElementById('hero');
         for (const part of [hero.querySelector('.act'), hero.querySelector('.pic'), hero.querySelector('.plate')]) out.push({ k: 'you', ...box(part) });
         document.querySelectorAll('#heroCards .card').forEach(c => out.push({ k: 'your cards', ...box(c) }));

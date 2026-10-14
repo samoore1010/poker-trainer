@@ -150,7 +150,10 @@
   .note.err { color: var(--bad); }
   .calc { animation: pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: .45; } }
-  .seat.folded .pic, .seat.folded .plate, .hero.folded .pic, .hero.folded .plate { opacity: .5; }
+  .seat.folded .av, .seat.folded .cards, .seat.folded .plate, .hero.folded .av, .hero.folded .plate { opacity: .42; filter: grayscale(.7); }
+  /* "FOLDED" across the foot of the avatar, just above the name: plain to see, and the sign the camera reads first */
+  .fold-tag { position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%); z-index: 4; padding: 1px 8px; border-radius: 4px; background: #121212; border: 1px solid rgba(255,255,255,.55); color: #fff; font: 700 .64rem var(--display); letter-spacing: .14em; text-transform: uppercase; line-height: 1.3; }
+  .fold-tag[hidden] { display: none; }
   .rg { margin-top: 3px; font: 500 .62rem var(--mono); color: #f3e3b3; background: rgba(20,12,6,.55); padding: 0 7px; border-radius: 8px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .card.known { box-shadow: 0 0 0 2px #f3e3b3, 0 2px 4px rgba(0,0,0,.4); }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -528,7 +531,7 @@
           <div class="bets" id="bets" aria-hidden="true"></div>
           <div class="hero" id="hero">
             <span class="act you" id="heroAct"></span>
-            <div class="pic"><div class="av" id="heroAv" title="Click to move the dealer, take the action, or change your stack"></div></div>
+            <div class="pic"><div class="av" id="heroAv" title="Click to move the dealer, take the action, or change your stack"></div><div class="fold-tag" id="heroFold" hidden>Folded</div></div>
             <div class="plate"><span class="nm" id="heroName" title="Click to move the dealer, take the action, or change your stack">You</span><span class="st" id="heroStack"></span></div>
             <i class="tbar"></i>
             <div class="cards" id="heroCards"></div>
@@ -871,7 +874,7 @@
     $('heroAct').className = 'act you' + (turn === 0 || over ? '' : heroLast.cls === 'blind' ? ' empty' : heroLast.text ? ' ' + heroLast.cls : live ? '' : ' empty');
     $('heroAct').textContent = over ? (m.foldedAt[0] !== null ? 'You folded' : w.includes(0) ? (w.length > 1 ? 'Split pot' : 'You win') : step === 4 ? 'Showdown' : 'Hand over')
       : turn === 0 ? (m.toCall[step] > 0 ? `Your turn · ${money(m.toCall[step])} to call` : 'Your turn') : heroLast.text || (live ? 'Waiting' : '');
-    heroEl.classList.toggle('turn', turn === 0); heroEl.classList.toggle('folded', heroDone); heroEl.classList.toggle('win', over && w.includes(0)); heroEl.classList.toggle('camflash', flashing(0));
+    heroEl.classList.toggle('turn', turn === 0); heroEl.classList.toggle('folded', heroDone); $('heroFold').hidden = !heroDone; heroEl.classList.toggle('win', over && w.includes(0)); heroEl.classList.toggle('camflash', flashing(0));
     document.querySelectorAll('.seat').forEach(e => e.remove());
     const tb = $('table'), inf = SC.inferredRanges(scenario);
     // the dealer button: click it to move it one seat on
@@ -889,6 +892,7 @@
       const act = document.createElement('div');
       if (step === 4) { act.className = 'act' + (folded ? ' fold' : ''); act.textContent = folded ? 'Fold' : describe(h.opps[i], h.board).short; }
       else if (turn === seat) { act.className = 'act toact'; act.textContent = 'To act'; }
+      else if (folded) { act.className = 'act empty'; act.textContent = ''; } // the "Folded" tag says it
       else { const x = seatAction(seat, step); act.className = 'act ' + (x.cls === 'blind' ? 'empty' : x.cls); act.textContent = x.text === 'Folded' ? 'Fold' : x.text; }
       s.appendChild(act);
       const pic = document.createElement('div'); pic.className = 'pic';
@@ -897,6 +901,7 @@
       else if (!folded) for (let k = 0; k < 2; k++) { const b = document.createElement('div'); b.className = 'card sm back editable'; b.dataset.slot = `opp:${seat}:${k}`; b.title = `Set ${o.name}'s cards`; cs.appendChild(b); }
       pic.appendChild(cs);
       const av = document.createElement('div'); av.className = 'av'; av.textContent = h.pos[seat]; av.title = `${SC.POS_NAMES[h.pos[seat]] || ''} · click to edit ${o.name}`; pic.appendChild(av);
+      if (folded) { const t = document.createElement('div'); t.className = 'fold-tag'; t.textContent = 'Folded'; pic.appendChild(t); } // across the foot of the avatar, just above the name: the sign the camera reads first
       s.appendChild(pic);
       const plate = document.createElement('div'); plate.className = 'plate';
       const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = o.name; plate.appendChild(nm);
@@ -1320,9 +1325,10 @@
   const lockedHero = () => (cam.lock.hero ? scenario.hero.cards.slice() : null);
   const lockedBoard = () => scenario.board.slice(0, cam.lock.board.length);
   const unverified = () => cam.lock && (cam.lock.hero === 'fast' || cam.lock.board.includes('fast'));
-  // Two new cards for you mean a new hand, but a card next to the middle can be misread as yours (a board card taken
-  // for a hole card). So: while this hand is still being played, the new pair has to hold, with no board showing, for
-  // a second and a half before the table moves on. Once the hand is over, it moves on at once.
+  // Two new cards for you mean a new hand: the table moves on to it (the old board goes), however the last hand
+  // looked like it ended. While the table still has this hand being played, the new pair has to hold for a second and
+  // a half first (a misread mustn't end a hand); once the hand is over, it moves on at once. (A board card read as
+  // yours is dropped before this: sanePair.)
   function isNewHand(r) {
     if (!r.hero) return false;
     const h = lockedHero(), b = lockedBoard();
@@ -1330,7 +1336,6 @@
     if (!fresh && !cleared) return false; // (a reading of the old hand still on its way doesn't cancel a new pair)
     const m = hand.m, playing = !m.ended && m.foldedAt[0] === null && m.frontier < 4;
     if (!playing) return true;
-    if (r.board && r.board.length) return false; // a board is showing: not the start of a hand
     const key = r.hero.slice().sort().join(), now = Date.now(), np = cam.newPair;
     if (!np || np.key !== key || now - np.seen > 1200) cam.newPair = { key, since: now };
     cam.newPair.seen = now;
@@ -1350,13 +1355,15 @@
     syncLock(); r = sanePair(r);
     const p = { newHand: isNewHand(r), hero: null, board: null, conflict: null, fixes: [], confirmHero: false, confirmBoard: [] };
     const h = p.newHand ? null : lockedHero(), b = p.newHand ? [] : lockedBoard(), src = p.newHand ? [] : cam.lock.board;
+    const fresh = !!(r.hero && h && r.hero.every(c => !h.includes(c))); // two new cards: a new hand (isNewHand), never a swap in this one
     if (r.hero) {
       if (!h) p.hero = r.hero;
       else if (sameCards(r.hero, h)) p.confirmHero = true;
+      else if (fresh) { /* not yet: the new pair is holding (isNewHand) */ }
       else if (ai && cam.lock.hero === 'fast') { p.hero = r.hero; p.fixes.push(`your cards ${cardsTxt(h)} → ${cardsTxt(r.hero)}`); }
       else if (ai || cam.lock.hero === 'you' || !aiCards()) p.conflict = { kind: 'hero', cards: r.hero, was: h }; // the on-device reading doesn't argue with the AI (unless it's the only reader)
     }
-    if (r.board && r.board.length) {
+    if (r.board && r.board.length && !fresh) { // (while a new pair holds, its board waits for the new hand)
       const next = b.slice(); let clash = false;
       for (let i = 0; i < Math.min(r.board.length, b.length); i++) {
         if (r.board[i] === b[i]) p.confirmBoard.push(i);
@@ -1571,7 +1578,21 @@
       }
       noteLag(capturedAt);
     };
-    liveBetting(T, street, after);
+    liveBetting(T, street, () => { followPot(T, street); after(); });
+  }
+  // The pot is a number printed on the table: when the camera reads it steadily (two readings in a row) and the
+  // table's own sum disagrees, the printed figure wins (the difference goes into this street's pot). A pot that
+  // matches with or without this street's bets counts as agreeing (apps differ on which they show).
+  function followPot(T, street) {
+    const L = cam.live, m = hand.m, s = Math.min(m.frontier, 3);
+    if (!T.pot || m.ended || s !== street || !T.readable.betting) { L.potKey = ''; return; }
+    const seen = T.pot * (T.unit === 'bb' ? scenario.bigBlind : 1), near = (a, b) => Math.abs(a - b) < 0.01 * Math.max(1, scenario.bigBlind) + 1e-9;
+    if (near(seen, m.potShow[s]) || near(seen, m.potStart[s])) { L.potKey = ''; return; }
+    const key = `${scenario.deal}:${s}:${seen}`;
+    if (L.potKey !== key) { L.potKey = key; return; }
+    L.potKey = '';
+    const r = SC.apply(scenario, 'set_pot', { pot: seen });
+    if (r.ok) { loadScenario(scenario); cam.betNote = `Pot: ${money(seen)} as the table shows it.`; cam.betAt = Date.now(); }
   }
   // Lag: from the moment the picture changed to the moment the table showed it.
   function noteLag(capturedAt) {
@@ -1634,7 +1655,7 @@
     tick();
   }
   // The table is set up from the camera: who's sitting where (players come and go), names, stacks, the dealer, the
-  // blinds. Names (and stacks, while the betting agrees) change at once; the players, the dealer and the blinds change
+  // blinds. Names and stacks (the figures printed on the table) change at once; the players, the dealer and the blinds change
   // between hands (mid-hand it would start the betting over), unless the betting can't be followed with the table as
   // it is: then the table is wrong, and it's set up from the camera straight away.
   function followSeats(T, bettingInSync) {
@@ -1643,7 +1664,7 @@
     const plan = SC.syncPlan(scenario, T);
     if (!plan.length) { cam.synced = true; L.planKey = ''; cam.seatNote = ''; return; }
     const fresh = scenario.streets.every(st => st.actions.every(a => a.filled || a.auto)) || L.offTrack >= 2;
-    const ids = plan.map(x => x.id).filter(id => id.startsWith('name:') || (id.startsWith('stack:') && (fresh || bettingInSync)) || fresh);
+    const ids = plan.map(x => x.id).filter(id => id.startsWith('name:') || id.startsWith('stack:') || fresh); // stacks as printed, at once
     const waiting = plan.filter(x => !ids.includes(x.id) && /^(players|dealer|blinds)$/.test(x.id));
     cam.seatNote = waiting.length ? `The camera shows ${waiting.map(x => x.text.toLowerCase()).join(', ')}: the table changes to match at the next hand.` : '';
     if (!ids.length) return;
@@ -2224,6 +2245,7 @@
   }
   // "What you should do": rule-of-thumb advice from position, hand strength, the board and the price (engine.recommend).
   const ACT_CLS = { fold: 'bad', check: 'mid', call: 'mid', bet: 'good', raise: 'good', wait: 'mid' };
+  let lastAdvice = null; // {key: deal:street, html}: the advice last shown for this street
   function adviceBlock(S) {
     const r = SC.recommendation(scenario, step, hand.hero, board(), S);
     const cls = ACT_CLS[r.action];
@@ -2315,8 +2337,12 @@
     if (needGuess()) { $('pane').innerHTML = topBlock(null, 0) + guessHist(); $('guessBtn').addEventListener('click', revealGuess); $('guessIn').addEventListener('keydown', e => { if (e.key === 'Enter') revealGuess(); }); $('guessIn').focus(); sim(step); return; }
     const S = scenario.heroHidden ? null : sim(step), chance = S ? S.chance : null;
     if (tab === 'read') {
-      if (step !== m.frontier) html += blk('What you should do', `<p class="note">Betting on the ${STEP[step].toLowerCase()} is finished. Go to the ${STEP[Math.min(m.frontier, 4)].toLowerCase()} for advice on your next decision.</p>${handLine(S)}`);
-      else html += S ? adviceBlock(S) : blk('What you should do', `<p class="note calc">Reading the spot…</p>${handLine(S)}`);
+      // The advice stays until something new comes (the next card, a new decision): when the betting on this street looks
+      // finished, the last advice for it stays up, rather than the table's guess about where the hand is.
+      const akey = `${scenario.deal}:${step}`;
+      if (step !== m.frontier && lastAdvice && lastAdvice.key === akey) html += lastAdvice.html;
+      else if (S) { const a = adviceBlock(S); if (step === m.frontier) lastAdvice = { key: akey, html: a }; html += a; }
+      else html += blk('What you should do', `<p class="note calc">Reading the spot…</p>${handLine(S)}`);
       const vs = vsLabel(step), live = liveSeats(step).length;
       if (!S) { /* the numbers are on their way */ }
       else if (step === 0) {
