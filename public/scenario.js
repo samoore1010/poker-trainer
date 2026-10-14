@@ -729,6 +729,32 @@
       sc.street = s;
       return { ok: true, summary: `${cap1(STREETS[s])}: action on ${seat === 0 ? 'you' : seatName(sc, seat)}${r.log.length ? ` (${r.log.join(', ')})` : ''}` };
     },
+    // Takes back a fold (a misread, or a mis-click): the player is in the hand again. Wherever their turn came round
+    // after it (and before the betting that was recorded went on), they check or call; the hand goes on from there.
+    bring_back(sc, a) {
+      const seat = seatFrom(sc, a.seat); if (seat < 0) return { ok: false, error: `Unknown player "${a.seat}". Use a ${SEAT_HELP}, a name, or a position.` };
+      const s = money(sc).foldedAt[seat];
+      if (s === null) return { ok: false, error: `${seatName(sc, seat)} hasn't folded.` };
+      const saved = clone(sc.streets);
+      const i = sc.streets[s].actions.findIndex(x => x.seat === seat && x.type === 'fold');
+      if (i < 0) return { ok: false, error: `${seatName(sc, seat)} folded without a fold on record.` };
+      sc.streets[s].actions.splice(i, 1);
+      const later = t => sc.streets.slice(t + 1).some(st => st.actions.length);
+      const theirTurn = t => { const mm = money(sc), sn = mm.street[t]; return !mm.ended && mm.frontier === t && sn && !sn.complete && sn.next === seat; };
+      const passive = t => { const sn = money(sc).street[t]; sc.streets[t].actions.push({ seat, type: sn.max > sn.contrib[seat] ? 'call' : 'check', to: 0, filled: true }); };
+      for (let t = s; t < 4; t++) {
+        const acts = sc.streets[t].actions; sc.streets[t].actions = [];
+        for (const x of acts) {
+          for (let g = 0; g < 4 && x.seat !== seat && theirTurn(t); g++) passive(t);
+          sc.streets[t].actions.push(x);
+        }
+        for (let g = 0; g < 4 && later(t) && theirTurn(t); g++) passive(t); // the betting went on to the next street
+        if (!later(t)) break;
+      }
+      if (replay(sc).dropped) { sc.streets = saved; return { ok: false, error: `Couldn't bring ${seatName(sc, seat)} back: the betting after their fold doesn't fit.` }; }
+      const m = money(sc); sc.street = Math.min(sc.street, m.frontier);
+      return { ok: true, summary: `${seat === 0 ? 'You are' : `${seatName(sc, seat)} is`} back in the hand` };
+    },
     show_street(sc, a) {
       const s = streetFrom(a.street); if (s < 0) return { ok: false, error: 'street must be preflop, flop, turn, river or showdown.' };
       for (let k = 0; k < Math.min(s, 4); k++) { if (replay(sc).ended) break; completeStreet(sc, k); }
@@ -936,6 +962,11 @@
       }
     });
     if (repaired && replay(w).dropped) return { ok: false, error: 'the earlier betting no longer adds up' };
+    // the picture shows a player in whom this table has folded, or the hand going on where this table has it over:
+    // the table took a wrong turn (a fold misread, a win called too soon), and that has to be put right, not kept
+    const m0 = money(w);
+    for (let seat = 0; seat < players; seat++) if (!seen[seat].folded && m0.foldedAt[seat] !== null && m0.foldedAt[seat] <= street) return { ok: false, error: `${seatName(w, seat)} is shown in the hand but works out folded`, wrongTurn: true };
+    if (m0.ended && (street > m0.ended.street || T.toAct !== null)) return { ok: false, error: 'the hand goes on in the picture but is over on this table', wrongTurn: true };
     const act = (seat, action, amount) => { const r = apply(w, 'act', { seat, action, amount }); if (r.ok) log.push(r.summary.replace(/^\w+: /, '')); return r.ok; };
     let partial = false;
     for (let guard = 0; guard < 80; guard++) {
@@ -944,7 +975,7 @@
       const s = m.frontier, snap = m.street[s], seat = m.next, x = seen[seat];
       if (s < street) { if (!act(seat, x.folded ? 'fold' : snap.max > snap.contrib[seat] ? 'call' : 'check')) { partial = true; break; } continue; }
       if (T.toAct === seat) break; // their turn now
-      if (T.toAct === null && (x.last === 'none' || x.last === 'post') && !x.folded) break; // not acted yet
+      if (T.toAct === null && !T.live && (x.last === 'none' || x.last === 'post') && !x.folded) break; // not acted yet (a quick live reading names no last actions: nobody to act there means everyone has)
       if (x.folded) { if (!act(seat, 'fold')) { partial = true; break; } continue; }
       if (x.bet > snap.max && !near(x.bet, snap.max)) { if (!act(seat, snap.max > 0 ? 'raise' : 'bet', x.bet)) { partial = true; break; } continue; }
       if (near(x.bet, snap.max) || (x.stack === 0 && x.bet > snap.contrib[seat])) { if (!act(seat, snap.max > snap.contrib[seat] ? 'call' : 'check')) { partial = true; break; } continue; }
@@ -970,6 +1001,16 @@
   // whole hand is rebuilt (earlier streets: folded players fold, the rest call), but only when the pot then matches.
   // → {ok, sc, log, scope: 'street'|'hand'} or {ok: false, error}
   function rebuildFrom(sc, T, street) {
+    // the table folded players the picture shows in (or ended the hand early): put them back first, keeping the
+    // betting that was right; only if that doesn't fit is the street, or the hand, rebuilt
+    const first = trackTable(sc, T, street);
+    if (first.wrongTurn && T.seats && T.seats.length === sc.opponents.length + 1) {
+      const w = clone(sc), m0 = money(w), back = [];
+      T.seats.forEach((x, seat) => { if (!x.folded && m0.foldedAt[seat] !== null && ops.bring_back(w, { seat }).ok) back.push(seatName(w, seat)); });
+      const r = back.length ? trackTable(w, T, street) : null;
+      // (it must land on the picture's street: run past it, and the calls it filled in don't match the chips shown)
+      if (r && r.ok && !r.partial && money(r.sc).frontier <= street) return { ...r, log: [`back in: ${back.join(', ')}`].concat(r.log), repaired: true, scope: 'street' };
+    }
     const tryFrom = from => {
       const w = clone(sc);
       for (let s = from; s < 4; s++) w.streets[s] = blankStreet();
@@ -981,7 +1022,9 @@
     if (street > 0) {
       const b = tryFrom(0);
       const k = T.unit === 'bb' ? sc.bigBlind : 1;
-      if (b.ok && T.pot && Math.abs(money(b.sc).potShow[Math.min(street, 3)] - T.pot * k) < 0.01 * Math.max(1, sc.bigBlind) + 1e-9) return { ...b, scope: 'hand' };
+      // the pot has to match, unless the table took a wrong turn: then the picture is the best there is
+      const potOk = (T.pot && Math.abs(money(b.sc).potShow[Math.min(street, 3)] - T.pot * k) < 0.01 * Math.max(1, sc.bigBlind) + 1e-9) || first.wrongTurn;
+      if (b.ok && potOk) return { ...b, scope: 'hand' };
     }
     if (a.ok) return { ...a, scope: 'street' };
     return { ok: false, error: a.error };
