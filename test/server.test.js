@@ -265,3 +265,16 @@ test('vision: replies parse even when wrapped, and live reads leave room for the
     assert.ok(bodies[1].max_tokens >= 16000); assert.equal(bodies[1].thinking, undefined);
   } finally { console.warn = warn; srv.close(); }
 });
+
+test('vision: amounts are read as printed, decimal point kept', () => {
+  const { parseAmount, normalizeLive, normalizeTable } = require('../server/vision');
+  assert.equal(parseAmount('$0.53'), 0.53); assert.equal(parseAmount('1,250'), 1250); assert.equal(parseAmount('€1,50'), 1.5);
+  assert.equal(parseAmount('2.5 BB'), 2.5); assert.equal(parseAmount('1.2k'), 1200); assert.equal(parseAmount(''), 0); assert.equal(parseAmount(7), 7);
+  assert.equal(parseAmount('all in'), null); assert.equal(parseAmount(-3), null);
+  const L = normalizeLive({ ok: true, cards_ok: false, bets: ['$0.10', '', '$0.53'], folded: [false, false, false], to_act: 1, pot: '$0.78', board: [], hero: [] });
+  assert.deepEqual(L.seats.map(x => x.bet), [0.1, 0, 0.53]); assert.equal(L.pot, 0.78); assert.equal(L.readable.betting, true);
+  assert.equal(normalizeLive({ ok: true, cards_ok: false, bets: ['$0.10', 'blurry'], folded: [false, false], to_act: 0, pot: '', board: [], hero: [] }).readable.betting, false);
+  const seat = (o = {}) => ({ name: 'A', stack: '$10.65', dealer: false, folded: false, in_front: '$0.05', last_action: 'none', ...o });
+  const T = normalizeTable({ readable: { cards: false, seats: true, names: true, stacks: true, betting: true }, problems: [], unit: 'chips', small_blind: 0.05, big_blind: 0.1, pot: '$0.15', seats: [seat(), seat({ name: 'B', dealer: true, in_front: '$0.10', stack: '' })], to_act: 0, board: [], hero: [] });
+  assert.deepEqual(T.seats.map(x => [x.stack, x.bet]), [[10.65, 0.05], [null, 0.1]]); assert.equal(T.pot, 0.15); assert.equal(T.readable.stacks, false);
+});

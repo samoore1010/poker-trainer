@@ -40,20 +40,24 @@ module.exports = function cardRoutes(router, { openai, vision }) {
 
   // POST {image, player?, fast?, live?, seats?, cards?} → the whole table, seat by seat (normalizeTable). fast: the live
   // model; otherwise the careful Sync model. live: the short read for following a hand (normalizeLive), seats = expected
-  // count, cards: false = leave the cards out (the phone reads them itself).
+  // count, cards: false = leave the cards out (the phone reads them itself). scale: {sb, bb, lo, hi}, the blinds and stack
+  // range, so a misplaced decimal point stands out.
   router.post('/api/cards/table', { metered: 'camera' }, async (req, res, { send }) => {
     if (!vision) throw new HttpError(503, 'vision_not_configured', 'Camera reading needs ANTHROPIC_API_KEY or OPENAI_API_KEY on the server.');
-    const { image, player, fast, live, seats, cards } = await readJson(req, 3 * 1024 * 1024);
+    const { image, player, fast, live, seats, cards, scale: sc } = await readJson(req, 3 * 1024 * 1024);
+    // the table's scale (blinds, stack range): plain numbers only, so the prompt can't carry anything else
+    const num = x => (typeof x === 'number' && Number.isFinite(x) && x > 0 && x < 1e9 ? x : 0);
+    const scale = sc && typeof sc === 'object' && num(sc.bb) ? { sb: num(sc.sb), bb: num(sc.bb), lo: num(sc.lo), hi: num(sc.hi) } : null;
     const m = typeof image === 'string' && image.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
     if (!m) throw new HttpError(400, 'image_required', 'Send {"image": "data:image/jpeg;base64,..."}.');
     const started = Date.now();
     const who = typeof player === 'string' ? player.slice(0, 300) : '';
     if (live === true) {
       // following live: the short read (bets, folds, whose turn, pot, cards)
-      const raw = await vision.readLive({ data: m[2], mime: m[1], player: who, seats: Number.isInteger(seats) && seats >= 2 && seats <= 9 ? seats : 0, cards: cards !== false });
+      const raw = await vision.readLive({ data: m[2], mime: m[1], player: who, seats: Number.isInteger(seats) && seats >= 2 && seats <= 9 ? seats : 0, cards: cards !== false, scale });
       return send.json(200, { ...normalizeLive(raw), provider: vision.name, model: vision.liveModel, ms: Date.now() - started });
     }
-    const raw = await vision.readTable({ data: m[2], mime: m[1], player: who, fast: fast === true });
+    const raw = await vision.readTable({ data: m[2], mime: m[1], player: who, fast: fast === true, scale });
     send.json(200, { ...normalizeTable(raw), provider: vision.name, model: fast === true ? vision.liveModel : vision.syncModel, ms: Date.now() - started });
   });
 };
