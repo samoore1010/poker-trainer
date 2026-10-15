@@ -1329,10 +1329,16 @@
   // looked like it ended. While the table still has this hand being played, the new pair has to hold for a second and
   // a half first (a misread mustn't end a hand); once the hand is over, it moves on at once. (A board card read as
   // yours is dropped before this: sanePair.)
+  // Your cards this hand, as far as the camera's concerned: the ones it read, or (once it has followed anything in
+  // this hand: a card, a bet) the ones on the table, however they got there.
+  const followedHand = () => !!cam.lock.hero || cam.lock.board.length > 0 || scenario.streets.some(st => st.actions.some(a => a.cam));
+  const handCards = () => lockedHero() || (!scenario.heroHidden && scenario.hero.cards.length === 2 && followedHand() ? scenario.hero.cards.slice() : null);
+  const freshPair = r => { const h = handCards(); return !!(r.hero && h && r.hero.every(c => !h.includes(c))); };
   function isNewHand(r) {
     if (!r.hero) return false;
-    const h = lockedHero(), b = lockedBoard();
-    const fresh = h && r.hero.every(c => !h.includes(c)), cleared = b.length > 0 && !!r.board && r.board.length === 0 && !sameCards(r.hero, h);
+    const h = handCards(), b = cam.lock.board.length ? lockedBoard() : followedHand() ? scenario.board.slice() : [];
+    // two new cards; or the board gone and your cards different (one card can repeat from the last hand)
+    const fresh = freshPair(r), cleared = b.length > 0 && !!r.board && r.board.length === 0 && !!h && !sameCards(r.hero, h);
     if (!fresh && !cleared) return false; // (a reading of the old hand still on its way doesn't cancel a new pair)
     const m = hand.m, playing = !m.ended && m.foldedAt[0] === null && m.frontier < 4;
     if (!playing) return true;
@@ -1346,7 +1352,7 @@
   function sanePair(r) {
     if (!r.hero) return r;
     if (r.board && !r.board.length) return r; // the board was cleared: a new hand, and any card may come round again
-    const onBoard = new Set([...(r.board || []), ...lockedBoard()]);
+    const onBoard = new Set([...(r.board || []), ...(freshPair(r) ? [] : lockedBoard())]); // (a new pair belongs to a new hand: the old board doesn't count)
     return r.hero.some(c => onBoard.has(c)) ? { ...r, hero: null } : r;
   }
   // What a reading would do: fill what isn't on the table yet, confirm what matches, let the AI correct cards that
@@ -1355,15 +1361,15 @@
     syncLock(); r = sanePair(r);
     const p = { newHand: isNewHand(r), hero: null, board: null, conflict: null, fixes: [], confirmHero: false, confirmBoard: [] };
     const h = p.newHand ? null : lockedHero(), b = p.newHand ? [] : lockedBoard(), src = p.newHand ? [] : cam.lock.board;
-    const fresh = !!(r.hero && h && r.hero.every(c => !h.includes(c))); // two new cards: a new hand (isNewHand), never a swap in this one
+    const holding = !p.newHand && freshPair(r); // two new cards: a new hand (isNewHand) once they hold, never a swap in this one
     if (r.hero) {
-      if (!h) p.hero = r.hero;
+      if (holding) { /* not yet: the new pair is holding */ }
+      else if (!h) p.hero = r.hero;
       else if (sameCards(r.hero, h)) p.confirmHero = true;
-      else if (fresh) { /* not yet: the new pair is holding (isNewHand) */ }
       else if (ai && cam.lock.hero === 'fast') { p.hero = r.hero; p.fixes.push(`your cards ${cardsTxt(h)} → ${cardsTxt(r.hero)}`); }
       else if (ai || cam.lock.hero === 'you' || !aiCards()) p.conflict = { kind: 'hero', cards: r.hero, was: h }; // the on-device reading doesn't argue with the AI (unless it's the only reader)
     }
-    if (r.board && r.board.length && !fresh) { // (while a new pair holds, its board waits for the new hand)
+    if (r.board && r.board.length && !holding) { // (while a new pair holds, its board waits for the new hand)
       const next = b.slice(); let clash = false;
       for (let i = 0; i < Math.min(r.board.length, b.length); i++) {
         if (r.board[i] === b[i]) p.confirmBoard.push(i);
@@ -1512,19 +1518,46 @@
     L.inflight++; L.lastSent = t0; cam.asked = cam.thumbNow; cam.needCheck = false;
     if (kind === 'full') L.fullBusy = true;
     try {
-      const body = kind === 'full' ? { image: liveImage('full'), fast: true } : { image: liveImage('short'), live: true, seats: scenario.opponents.length + 1, cards: aiCards() };
+      const body = kind === 'full' ? { image: liveImage('full'), fast: true, scale: tableScale() } : { image: liveImage('short'), live: true, seats: scenario.opponents.length + 1, cards: aiCards(), scale: tableScale() };
       const T = await HV.api.request('/api/cards/table', { body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
       cam.ai.calls++; cam.ai.fails = 0;
       const ms = Date.now() - t0;
       if (kind === 'short') L.ms = L.ms ? L.ms * 0.7 + ms * 0.3 : ms; else L.fullMs = L.fullMs ? L.fullMs * 0.7 + ms * 0.3 : ms;
       if (!cam.stream) return;
-      if (kind === 'full') { L.fullAt = Date.now(); L.fullHand = hand.deal; if (T.readable.seats) { cam.seenPlayers = T.seats.length; followSeats(T, L.inSync); } L.seatMiss = 0; if (ver === (cam.cropVer || 0)) { if (T.box) L.box = T.box; noteTableBox(T); } } // (a box found in the picture before a new crop is stale)
+      if (kind === 'full') { L.fullAt = Date.now(); L.fullHand = hand.deal; if (T.readable.seats) { cam.seenPlayers = T.seats.length; followSeats(plausible(T), L.inSync); } L.seatMiss = 0; if (ver === (cam.cropVer || 0)) { if (T.box) L.box = T.box; noteTableBox(T); } } // (a box found in the picture before a new crop is stale)
       if (seq < L.applied) return; // a newer reading has already been applied: its betting and cards are fresher
       L.applied = seq; L.at = Date.now(); L.reads++;
       applyLive(T, t0);
     } catch (e) { aiFailed(e); } finally { L.inflight--; if (kind === 'full') L.fullBusy = false; renderCamRead(); }
   }
   // While actions are being played onto the table one by one, newer readings wait for it (the latest one only).
+  // ----- amounts that can't be right -----
+  // The AI is told the table's scale (the blinds, the stacks), so a misplaced decimal point stands out to it.
+  function tableScale() {
+    const stacks = [scenario.hero.stack].concat(scenario.opponents.map(o => o.stack)).filter(x => x > 0);
+    return { sb: scenario.smallBlind || scenario.bigBlind / 2, bb: scenario.bigBlind, lo: stacks.length ? Math.min(...stacks) : 0, hi: stacks.length ? Math.max(...stacks) : 0 };
+  }
+  // A bet bigger than everything the player had when the hand began can't have happened: it's a misread, most often a
+  // lost decimal point ($0.53 read as 53). Divided by 100 it fits? Then that's what it was. Otherwise the bet is
+  // dropped from the reading (the last one seen stands), and the same for the pot (more than everyone's chips).
+  function plausible(T) {
+    if (!T.seats || T.seats.length !== scenario.opponents.length + 1) return T;
+    const k = T.unit === 'bb' ? scenario.bigBlind : 1, had = [scenario.hero.stack].concat(scenario.opponents.map(o => o.stack));
+    const fixes = [], fit = (v, max) => (v * k <= max + 1e-9 ? v : v / 100 * k <= max + 1e-9 ? (fixes.push(`${money(v * k)} → ${money(v / 100 * k)}`), v / 100) : null);
+    const seats = T.seats.map((x, i) => {
+      // a stack about a hundred times this seat's (a lost decimal point) is read as the hundredth
+      if (x.stack > 0 && had[i] > 0 && x.stack * k > 50 * had[i] && x.stack / 100 * k <= 3 * had[i]) { fixes.push(`stack ${money(x.stack * k)} → ${money(x.stack / 100 * k)}`); x = { ...x, stack: x.stack / 100 }; }
+      if (!x.bet) return x;
+      const v = fit(x.bet, had[i]);
+      if (v === null) { fixes.push(`ignored ${money(x.bet * k)} for ${i === 0 ? 'you' : scenario.opponents[i - 1].name} (more than their chips)`); return { ...x, bet: cam.mem && cam.mem.bets && cam.mem.bets[i] != null ? cam.mem.bets[i] : 0 }; }
+      return v === x.bet ? x : { ...x, bet: v };
+    });
+    const all = had.reduce((a, b) => a + b, 0) + (scenario.potFix || []).reduce((a, b) => a + b, 0);
+    const pot = T.pot ? fit(T.pot, all) : T.pot;
+    if (fixes.length) camNote(`Amounts that couldn't be right: ${fixes.join(', ')}.`, false, true);
+    return { ...T, seats, pot: pot === null ? null : pot };
+  }
+
   // ----- your corrections come first -----
   // When you put a player back in the hand, or say whose turn it is, the camera's readings are bent to fit: the player
   // stays in for the rest of the street (a fold the camera keeps seeing is taken as a misread), and the turn stays where
@@ -1569,6 +1602,7 @@
     const street = aiCards() && T.readable.cards && T.board ? BOARD_N.indexOf(T.board.length) : Math.max(0, BOARD_N.indexOf(scenario.board.length));
     // the readings before this one count too (bets confirmed by two in a row, swept chips remembered, folds by majority);
     // then your corrections on top
+    T = plausible(T);
     if (T.readable.betting && T.seats.length) { const r = SC.smoothReading(cam.mem, T, `${scenario.deal}:${street}`, `${scenario.deal}`); cam.mem = r.mem; T = r.T; }
     T = pinned(T);
     if (T.live && T.seats.length && T.seats.length !== scenario.opponents.length + 1) cam.live.seatMiss++; // the seats no longer match: a full read will sort it out
@@ -1610,6 +1644,17 @@
     if (!T.readable.betting) { cam.betNote = 'Betting: not readable in this picture.'; L.inSync = false; return done(); }
     if (T.seats.length !== scenario.opponents.length + 1) { cam.betNote = `Betting: waiting for the table to match the camera (${T.seats.length} players on camera).`; L.inSync = false; return done(); }
     if (T.held) { cam.betNote = 'Betting: keeping your correction until someone acts.'; return done(); } // you said whose turn it is
+    // the bets have to add up with the pot printed on the table (with or without this street's bets in it): a bet that
+    // never happened doesn't show in the pot, so a reading that doesn't add up waits for a clear one (three seconds at
+    // most, so a pot this table has wrong can't stop the tracking)
+    if (T.pot && hand.m.frontier === street && !hand.m.ended) {
+      const k = T.unit === 'bb' ? scenario.bigBlind : 1, start = hand.m.potStart[street], P = T.pot * k, sum = T.seats.reduce((a, x) => a + x.bet * k, 0);
+      const tol = Math.max(scenario.bigBlind, 0.02 * P);
+      if (Math.abs(P - (start + sum)) > tol && Math.abs(P - start) > tol) {
+        if (!L.oddSince) L.oddSince = Date.now();
+        if (Date.now() - L.oddSince < 3000) { cam.betNote = 'Betting: the bets on camera don\'t add up to the pot; waiting for a clear reading.'; return done(); }
+      } else L.oddSince = 0;
+    } else L.oddSince = 0;
     let res = SC.trackTable(scenario, T, street), rebuilt = '';
     if (!res.ok) {
       L.bad = (L.bad || 0) + 1;
@@ -1689,7 +1734,7 @@
     if (!cam.canvas || cam.syncBusy) return;
     cam.syncBusy = true; $('camSync').disabled = true; camNote('Reading the whole table…');
     try {
-      const T = await HV.api.request('/api/cards/table', { body: JSON.stringify({ image: frameJpeg(0.9) }), headers: { 'Content-Type': 'application/json' } });
+      const T = await HV.api.request('/api/cards/table', { body: JSON.stringify({ image: frameJpeg(0.9), scale: tableScale() }), headers: { 'Content-Type': 'application/json' } });
       cam.ai.calls++; cam.sync = T; if (T.box && cam.live) cam.live.box = T.box; // for Fit to table
       if (T.readable.seats) cam.seenPlayers = T.seats.length;
       if (!T.readable.seats) { cam.synced = false; camNote(`The camera couldn't read the seats clearly${T.problems.length ? ` (${T.problems.join('; ')})` : ''}: nothing changed.`, true); return; }

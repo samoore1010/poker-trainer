@@ -43,10 +43,10 @@ const SEAT = {
   type: 'object', additionalProperties: false, required: ['name', 'stack', 'dealer', 'folded', 'in_front', 'last_action'],
   properties: {
     name: { type: 'string', description: 'The name shown for this seat, exactly as written; empty if none can be read.' },
-    stack: { type: 'number', description: 'The chips this player has left behind (not counting chips in front of them); -1 if it cannot be read.' },
+    stack: { type: 'string', description: 'Chips behind (not counting the bet in front), copied exactly as printed with its decimal point and symbol, e.g. "$10.65"; "" if not readable.' },
     dealer: { type: 'boolean', description: 'The dealer button (D) is at this seat.' },
     folded: { type: 'boolean', description: 'Out of this hand (folded, or not dealt in).' },
-    in_front: { type: 'number', description: 'Chips this seat has put in on the current street (bet in front of it, blinds included); 0 if none.' },
+    in_front: { type: 'string', description: 'The bet in front of this seat on the current street (blinds included), copied exactly as printed with its decimal point and symbol, e.g. "$0.53", "1.5 BB", "1,250"; "" if none.' },
     last_action: { type: 'string', enum: ['none', 'post', 'check', 'call', 'bet', 'raise', 'all-in', 'fold'], description: 'Its latest action on this street; post = only its blind so far; none = not acted on this street yet.' },
   },
 };
@@ -65,7 +65,7 @@ const TABLE_SCHEMA = {
     unit: { type: 'string', enum: ['chips', 'big blinds'], description: 'What the amounts on the table are shown in.' },
     small_blind: { type: 'number', description: 'Small blind if shown on the table (e.g. "$0.50/$1"), else 0.' },
     big_blind: { type: 'number', description: 'Big blind if shown, else 0.' },
-    pot: { type: 'number', description: 'The total pot as the table shows it, or 0 if not shown.' },
+    pot: { type: 'string', description: 'The pot as printed on the table, copied exactly with its decimal point and symbol, e.g. "$0.60"; "" if not shown.' },
     seats: { type: 'array', items: SEAT, description: 'Every occupied seat, starting with the followed player and going clockwise (on the picture: from the bottom up the left side, across the top, down the right side). Leave out empty seats.' },
     to_act: { type: 'integer', description: 'Index in seats of the player whose turn it is (highlighted, timer bar), or -1.' },
     board: { type: 'array', items: CARD, description: 'Face-up community cards, left to right. Empty if none.' },
@@ -81,10 +81,10 @@ const LIVE_SCHEMA = {
     rotate: { type: 'integer', enum: [0, 90, 180, 270], description: 'Degrees to turn the picture clockwise to make the table upright; 0 if it is.' },
     ok: { type: 'boolean', description: 'true only if every seat\'s bet and folded state and whose turn it is are clearly readable.' },
     cards_ok: { type: 'boolean', description: 'true only if every face-up card is clearly readable.' },
-    bets: { type: 'array', items: { type: 'number' }, description: 'Chips in front of each seat on this street (blinds included), followed player first, then clockwise. 0 if none.' },
+    bets: { type: 'array', items: { type: 'string' }, description: 'The bet in front of each seat on this street (blinds included), copied exactly as printed with its decimal point and symbol (e.g. "$0.53"), followed player first, then clockwise; "" if none.' },
     folded: { type: 'array', items: { type: 'boolean' }, description: 'Per seat, same order: out of the hand.' },
     to_act: { type: 'integer', description: 'Index (same order) of the seat whose turn it is, or -1.' },
-    pot: { type: 'number', description: 'Total pot as shown, or 0.' },
+    pot: { type: 'string', description: 'The pot as printed, copied exactly with its decimal point and symbol; "" if not shown.' },
     board: { type: 'array', items: CARD, description: 'Face-up community cards, left to right.' },
     hero: { type: 'array', items: CARD, description: 'The followed player\'s face-up hole cards.' },
   },
@@ -107,6 +107,13 @@ const READING_GUIDE = [
   '- If you cannot tell whether a card is on the board or in a player\'s hand, leave it out and say so.',
 ].join('\n');
 
+// What size the amounts on this table are, so a misplaced decimal point stands out ($0.53 is not $53).
+function scaleLine(scale) {
+  if (!scale) return [];
+  const f = x => (x >= 1 ? String(Math.round(x * 100) / 100) : x.toFixed(2));
+  return [`Scale: the blinds here are ${f(scale.sb)}/${f(scale.bb)}${scale.lo ? ` and the stacks about ${f(scale.lo)} to ${f(scale.hi)}` : ''}. Bets and the pot are of that size: copy each amount with its decimal point exactly as printed (0.53 is not 53).`];
+}
+
 function prompt(player, betting) {
   const lines = [
     'You read playing cards in a photo of a poker table. It may be a real table or a screen showing a poker app; deck designs, colours and table layouts vary.',
@@ -126,8 +133,9 @@ function prompt(player, betting) {
   return lines.join('\n');
 }
 
-function tablePrompt(player) {
+function tablePrompt(player, scale) {
   return [
+    ...scaleLine(scale),
     'You read a photo of a poker table, seat by seat. It may be a real table or a screen showing a poker app; layouts vary.',
     `The followed player is ${player}. List every occupied seat starting with the followed player, then clockwise (on the picture: from the bottom up the left side, across the top, down the right side).`,
     'For each seat: the name as written, the stack behind (chips left, not counting the bet in front), whether the dealer button is there, whether the player folded, the chips in front of them on this street, and their latest action on this street.',
@@ -139,8 +147,9 @@ function tablePrompt(player) {
   ].join('\n');
 }
 const TABLE_PLAYER = 'the player nearest the camera at the bottom centre (in the Hand Walkthrough app, the name plate "You")';
-function livePrompt(player, seats, cards = true) {
+function livePrompt(player, seats, cards = true, scale = null) {
   return [
+    ...scaleLine(scale),
     'You follow a poker hand in a photo of a table (a real table or a poker app on a screen), as fast as possible.',
     `Seats in order: the followed player (${player}) first, then clockwise (on the picture: up the left side, across the top, down the right side)${seats ? `; there should be ${seats} seats` : ''}.`,
     `Per seat: the chips in front of it on this street, and whether it has folded. Then whose turn it is (highlighted seat, timer bar)${cards ? ', the pot as shown, and the face-up cards (codes: rank then suit, e.g. Ah, Td)' : ' and the pot as shown. Leave board and hero empty and cards_ok false: the cards are read elsewhere'}.`,
@@ -151,18 +160,33 @@ function livePrompt(player, seats, cards = true) {
     'Never guess: set ok or cards_ok to false if you cannot read that part clearly, or cannot tell board cards from the player\'s.',
   ].join('\n');
 }
+// An amount as printed ("$0.53", "1,250", "2.5 BB", "€1,50", 12) → a number, or null. Copying the figure as printed
+// and turning it into a number here keeps the decimal point: a model writing numbers itself can drop it (0.53 → 53).
+function parseAmount(v) {
+  if (typeof v === 'number') return Number.isFinite(v) && v >= 0 ? v : null;
+  if (typeof v !== 'string') return null;
+  let t = v.trim().toLowerCase().replace(/bbs?|big blinds?|[$€£¥\s]/g, '');
+  if (!t) return 0;
+  let mult = 1;
+  if (/k$/.test(t)) { mult = 1000; t = t.slice(0, -1); } else if (/m$/.test(t)) { mult = 1e6; t = t.slice(0, -1); }
+  if (/^\d+,\d{1,2}$/.test(t)) t = t.replace(',', '.'); // a decimal comma ("1,50")
+  else t = t.replace(/,/g, ''); // thousands ("1,250")
+  if (!/^\d*\.?\d+$/.test(t)) return null;
+  const n = parseFloat(t) * mult;
+  return Number.isFinite(n) ? n : null;
+}
 // → the same shape as normalizeTable (seats carry only bet and folded; names, stacks and the dealer come from the full read)
 function normalizeLive(raw) {
   const r = raw && typeof raw === 'object' ? raw : {};
   const bets = Array.isArray(r.bets) ? r.bets.slice(0, 9) : [], folded = Array.isArray(r.folded) ? r.folded : [];
   const problems = [];
-  let betting = !!r.ok && bets.length >= 2 && folded.length === bets.length && bets.every(x => Number.isFinite(+x) && +x >= 0);
+  let betting = !!r.ok && bets.length >= 2 && folded.length === bets.length && bets.every(x => parseAmount(x) !== null);
   if (r.ok && !betting) problems.push('the seats didn\'t add up');
-  const seats = bets.map((x, i) => ({ name: '', stack: null, dealer: false, folded: !!folded[i], bet: Number.isFinite(+x) && +x >= 0 ? +x : 0, last: 'none' }));
+  const seats = bets.map((x, i) => ({ name: '', stack: null, dealer: false, folded: !!folded[i], bet: parseAmount(x) || 0, last: 'none' }));
   const cards = normalize({ board: r.board, hero: r.hero, unsure: [] });
   const cardsOk = !!r.cards_ok && !cards.unsure.length;
   return {
-    live: true, rotate: [90, 180, 270].includes(r.rotate) ? r.rotate : 0, pot: Number.isFinite(+r.pot) && +r.pot > 0 ? +r.pot : null,
+    live: true, rotate: [90, 180, 270].includes(r.rotate) ? r.rotate : 0, pot: parseAmount(r.pot) || null,
     readable: { cards: cardsOk, seats: false, names: false, stacks: false, betting }, problems, unit: 'chips', blinds: null, seats,
     toAct: Number.isInteger(r.to_act) && r.to_act >= 0 && r.to_act < seats.length ? r.to_act : null,
     board: cardsOk ? cards.board : null, hero: cardsOk ? cards.hero : null,
@@ -176,8 +200,8 @@ function normalizeTable(raw) {
   const readable = { cards: !!rd.cards, seats: !!rd.seats, names: !!rd.names, stacks: !!rd.stacks, betting: !!rd.betting };
   const seats = (Array.isArray(r.seats) ? r.seats : []).slice(0, 9).map(x => ({
     name: typeof x.name === 'string' ? x.name.trim().slice(0, 24) : '',
-    stack: Number.isFinite(+x.stack) && +x.stack >= 0 ? +x.stack : null,
-    dealer: !!x.dealer, folded: !!x.folded, bet: Number.isFinite(+x.in_front) && +x.in_front >= 0 ? +x.in_front : 0,
+    stack: x.stack === '' ? null : parseAmount(x.stack),
+    dealer: !!x.dealer, folded: !!x.folded, bet: parseAmount(x.in_front) || 0,
     last: typeof x.last_action === 'string' ? x.last_action : 'none',
   }));
   if (seats.length < 2 || seats.filter(x => x.dealer).length !== 1) { if (readable.seats) problems.push(seats.length < 2 ? 'fewer than two seats seen' : 'the dealer button wasn\'t clear'); readable.seats = false; }
@@ -188,7 +212,7 @@ function normalizeTable(raw) {
   if (cards.unsure.length) { readable.cards = false; problems.push(...cards.unsure); }
   const sb = +r.small_blind, bb = +r.big_blind;
   return {
-    rotate: [90, 180, 270].includes(r.rotate) ? r.rotate : 0, pot: Number.isFinite(+r.pot) && +r.pot > 0 ? +r.pot : null,
+    rotate: [90, 180, 270].includes(r.rotate) ? r.rotate : 0, pot: parseAmount(r.pot) || null,
     readable, problems, unit: r.unit === 'big blinds' ? 'bb' : 'chips', blinds: bb > 0 && sb > 0 && sb <= bb ? { small: sb, big: bb } : null, seats,
     toAct: Number.isInteger(r.to_act) && r.to_act >= 0 && r.to_act < seats.length ? r.to_act : null,
     board: readable.cards ? cards.board : null, hero: readable.cards ? cards.hero : null,
@@ -253,11 +277,11 @@ function createVision(config, openai) {
       read({ data, mime, player, betting }) {
         return ask({ data, mime, model, system: prompt(player || DEFAULT_PLAYER, betting), schema: betting ? BETTING_SCHEMA : SCHEMA, text: 'Read the board and the player\'s cards.', effort: 'low' });
       },
-      readTable({ data, mime, player, fast }) {
-        return ask({ data, mime, model: fast ? liveModel : syncModel, system: tablePrompt(player || TABLE_PLAYER), schema: TABLE_SCHEMA, text: 'Read the whole table, seat by seat.', effort: fast ? 'low' : 'medium', quick: fast });
+      readTable({ data, mime, player, fast, scale }) {
+        return ask({ data, mime, model: fast ? liveModel : syncModel, system: tablePrompt(player || TABLE_PLAYER, scale), schema: TABLE_SCHEMA, text: 'Read the whole table, seat by seat.', effort: fast ? 'low' : 'medium', quick: fast });
       },
-      readLive({ data, mime, player, seats, cards }) {
-        return ask({ data, mime, model: liveModel, system: livePrompt(player || TABLE_PLAYER, seats, cards), schema: LIVE_SCHEMA, text: 'Bets, folds, whose turn, pot, cards.', effort: 'low', quick: true });
+      readLive({ data, mime, player, seats, cards, scale }) {
+        return ask({ data, mime, model: liveModel, system: livePrompt(player || TABLE_PLAYER, seats, cards, scale), schema: LIVE_SCHEMA, text: 'Bets, folds, whose turn, pot, cards.', effort: 'low', quick: true });
       },
     };
     // Thinking counts against max_tokens: a tight cap ends the answer before the JSON is written. Live reads turn
@@ -298,8 +322,8 @@ function createVision(config, openai) {
     return {
       name: 'openai', model, syncModel, liveModel,
       read({ data, mime, player, betting }) { return ask({ data, mime, model, system: prompt(player || DEFAULT_PLAYER, betting), schema: betting ? BETTING_SCHEMA : SCHEMA, name: 'cards', text: 'Read the board and the player\'s cards.' }); },
-      readTable({ data, mime, player, fast }) { return ask({ data, mime, model: fast ? liveModel : syncModel, system: tablePrompt(player || TABLE_PLAYER), schema: TABLE_SCHEMA, name: 'table', text: 'Read the whole table, seat by seat.' }); },
-      readLive({ data, mime, player, seats, cards }) { return ask({ data, mime, model: liveModel, system: livePrompt(player || TABLE_PLAYER, seats, cards), schema: LIVE_SCHEMA, name: 'live', text: 'Bets, folds, whose turn, pot, cards.' }); },
+      readTable({ data, mime, player, fast, scale }) { return ask({ data, mime, model: fast ? liveModel : syncModel, system: tablePrompt(player || TABLE_PLAYER, scale), schema: TABLE_SCHEMA, name: 'table', text: 'Read the whole table, seat by seat.' }); },
+      readLive({ data, mime, player, seats, cards, scale }) { return ask({ data, mime, model: liveModel, system: livePrompt(player || TABLE_PLAYER, seats, cards, scale), schema: LIVE_SCHEMA, name: 'live', text: 'Bets, folds, whose turn, pot, cards.' }); },
     };
     async function ask({ data, mime, model, system, schema, name, text: say }) {
       const res = await openai.responses({
@@ -320,4 +344,4 @@ function createVision(config, openai) {
   return null;
 }
 
-module.exports = { createVision, parseJson, normalize, normalizeTable, normalizeLive, CODES, SCHEMA, BETTING_SCHEMA, TABLE_SCHEMA, LIVE_SCHEMA, POSITIONS };
+module.exports = { createVision, parseJson, parseAmount, normalize, normalizeTable, normalizeLive, CODES, SCHEMA, BETTING_SCHEMA, TABLE_SCHEMA, LIVE_SCHEMA, POSITIONS };
