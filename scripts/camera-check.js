@@ -54,7 +54,7 @@ const { loadConfig } = require('../server/config');
     await page.route(origin + '/', async route => {
       const response = await route.fetch();
       const html = (await response.text()).replace('})();\n</script>',
-        'window.__cameraTest = { cam, askLive, animateTo, getScenario: () => SC.clone(scenario), api: HV.api };\n})();\n</script>');
+        'window.__cameraTest = { cam, askLive, animateTo, tableCrop, getScenario: () => SC.clone(scenario), api: HV.api };\n})();\n</script>');
       await route.fulfill({ response, body: html });
     });
     await page.goto(origin);
@@ -103,6 +103,8 @@ const { loadConfig } = require('../server/config');
     });
     assert.equal(regression.seenPlayers, 3, 'obsolete full reading must not update seats');
     assert.equal(regression.committed, true, 'state commit must complete without waiting for animation');
+    const crops = await page.evaluate(() => { const t=__cameraTest, previous=t.cam.crop; t.cam.crop=null; const first=t.tableCrop([0.2,0.2,0.8,0.8]); t.cam.crop={x:0.2,y:0.2,w:0.6,h:0.6};const second=t.tableCrop([0.2,0.2,0.8,0.8]);t.cam.crop=previous;return {first,second}; });
+    assert.deepEqual(crops.first,crops.second,'full-source boxes must not compound the current crop');
     await page.locator('#camClose').click();
     const stopped = await page.evaluate(() => cameraCheck.frames);
     await page.waitForTimeout(350);
