@@ -71,13 +71,16 @@ const { loadConfig } = require('../server/config');
     await page.waitForFunction(() => !document.getElementById('decisionNow').textContent.includes('Fold —'), null, { timeout: 5000 });
     await page.evaluate(() => { fixture.enabled = false; fixture.draw(); });
     await page.waitForFunction(() => document.getElementById('decisionNow').hidden);
-    // A pending housekeeping request must be aborted when active controls reappear.
+    // Noisy controls must let an in-flight table request finish.
     await page.evaluate(() => {
       const t = __decisionTest; window.priorityCheck = { aborted: false, urgent: 0, request: t.api.request, has: t.api.has };
       t.api.has = feature => feature === 'vision';
       t.api.request = (path, options) => {
         const body = JSON.parse(options.body);
-        if (!body.decision) return new Promise((resolve,reject) => options.signal.addEventListener('abort', () => { priorityCheck.aborted=true; reject(new DOMException('cancel','AbortError')); }, {once:true}));
+        if (!body.decision) return new Promise((resolve,reject) => {
+          priorityCheck.finish = resolve;
+          options.signal.addEventListener('abort', () => { priorityCheck.aborted=true; reject(new DOMException('cancel','AbortError')); }, {once:true});
+        });
         priorityCheck.urgent++;
         return Promise.resolve({ unit:'chips', readable:{betting:true,cards:true,seats:true,names:false,stacks:false}, hero:['9c','4h'],board:[],pot:5.5,toAct:0,rotate:0,problems:[],
           controls:{active:true,enabled:true,action:'call',toCall:3,unit:'chips',confidence:1},
@@ -87,7 +90,24 @@ const { loadConfig } = require('../server/config');
     });
     await page.waitForTimeout(100);
     await page.evaluate(() => { fixture.enabled=true; fixture.call='Call 3'; fixture.draw(); });
-    await page.waitForFunction(() => priorityCheck.aborted && priorityCheck.urgent > 0, null, {timeout:10000});
+    await page.waitForTimeout(1800);
+    assert.equal(await page.evaluate(() => priorityCheck.aborted), false);
+    assert.equal(await page.evaluate(() => priorityCheck.urgent), 0);
+    await page.evaluate(() => priorityCheck.finish({ unit:'chips', readable:{betting:true,cards:true,seats:false}, hero:['9c','4h'],board:[],pot:5.5,toAct:0,rotate:0,problems:[], seats:[{bet:1,folded:false},{bet:4,folded:false},{bet:0,folded:true},{bet:0,folded:true},{bet:0.5,folded:true}] }));
+    await page.waitForFunction(() => __decisionTest.cam.live.inflight === 0);
+    // Ordinary camera use must show advice without controls or user-confirmed history.
+    await page.evaluate(() => {
+      fixture.enabled=false; fixture.draw();
+      const t=__decisionTest; t.decisions.reset(); t.cam.joinedMidHand=true;
+      const sc=PokerScenario.create({opponents:4,stack:50,bigBlind:1,smallBlind:0.5,randomStacks:false});
+      PokerScenario.apply(sc,'set_hero_cards',{cards:['As','Ah']});
+      window.autoScenario=sc; t.loadScenario(sc);
+      window.refreshAdvice=setInterval(()=>t.loadScenario(autoScenario),50);
+    });
+    await page.waitForFunction(() => !!__decisionTest.recommendation(), null, {timeout:10000});
+    assert.ok(await page.locator('.advice .adv-act').count());
+    assert.equal(await page.locator('[data-confirm-history]').count(),0);
+    await page.evaluate(() => clearInterval(refreshAdvice));
     await page.click('#camClose');
     await page.evaluate(() => { __decisionTest.api.request=priorityCheck.request; __decisionTest.api.has=priorityCheck.has; });
     // A controlled source supplies actual history and bypasses video inference.
@@ -115,6 +135,6 @@ const { loadConfig } = require('../server/config');
     });
     assert.ok(workerResult && typeof workerResult.action === 'string');
     assert.deepEqual(errors, []);
-    console.log('PASS: local active/disabled controls, call/check OCR, coloured cards, urgent preflop advice, price-change invalidation control disappearance, urgent preemption and structured-source sequencing');
+    console.log('PASS: local active/disabled controls, call/check OCR, coloured cards, urgent preflop advice, price-change invalidation control disappearance, non-starving table reads, automatic advice without controls or confirmation, and structured-source sequencing');
   } finally { if(browser) await browser.close(); await new Promise(r => server.close(r)); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

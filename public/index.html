@@ -684,7 +684,7 @@
     const { scenario: clean } = SC.normalize(sc);
     scenario = clean; hand = materialize(scenario, opts.prev === undefined ? hand : opts.prev);
     step = scenario.street; cache = {}; gen++;
-    if (typeof adviceClient !== 'undefined') adviceClient.cancel(); guessed = {}; counted = {};
+    guessed = {}; counted = {}; // AdviceClient keeps identical decisions in flight across table refreshes.
     if (readSeat !== null && readSeat > scenario.opponents.length) closeRead();
     else if (readSeat !== null) $('rangeTab').firstChild.textContent = `${scenario.opponents[readSeat - 1].name}'s range`;
     $('nOpp').value = String(scenario.opponents.length);
@@ -1023,11 +1023,14 @@
     bar.hidden = false;
     bar.classList.toggle('you', you);
   }
-  const adviceClient = new AdviceClient(() => { scheduleRender(); renderDecision(); });
+  const adviceClient = new AdviceClient(() => { scheduleRender(); renderDecision(); }, payload => {
+    const eq = payload.street === 0 ? { chance: 0 } : E.equity({ hero: payload.hero, board: payload.board, opps: SC.engineOpponents(payload.scenario, payload.street), trials: 1000 });
+    return SC.recommendation(payload.scenario, payload.street, payload.hero, payload.board, eq);
+  });
   function currentRecommendation() {
     if (scenario.heroHidden) return null;
     const result = adviceClient.request({ scenario: SC.clone(scenario), street: step, hero: hand.hero, board: board() });
-    return cam.stream && !decisionValidation().ready ? null : result;
+    return result; // Recognition confidence annotates advice; it must not disable the trainer.
   }
   function heroRec() { return currentRecommendation(); }
   function act(action, amount, auto) {
@@ -1851,7 +1854,6 @@
     });
   }
 
-  function historySignature() { return JSON.stringify([scenario.deal, scenario.streets.map(st => st.actions.filter(a => a.filled)), cam.joinedMidHand]); }
   function decisionValidation() {
     const m = hand.m, street = Math.min(m.frontier, 3);
     const result = decisions.validate({ bigBlind: scenario.bigBlind, players: scenario.opponents.length + 1, button: scenario.button,
@@ -1859,7 +1861,7 @@
       folded: m.foldedAt.map(x => x !== null), contributions: m.street[street]?.contrib,
       behind: [scenario.hero.stack,...scenario.opponents.map(o => o.stack)].map((s,i) => Math.max(0,s-m.contrib[i])),
       hero: scenario.heroHidden ? null : scenario.hero.cards, board: scenario.board,
-      historyUncertain: (scenario.streets.slice(0, street + 1).some(st => st.actions.some(a => a.filled)) || (cam.joinedMidHand && scenario.streets.some(st => st.actions.some(a => a.cam)))) && cam.confirmedHistory !== historySignature() }, Date.now());
+      historyUncertain: (scenario.streets.slice(0, street + 1).some(st => st.actions.some(a => a.filled)) || (cam.joinedMidHand && scenario.streets.some(st => st.actions.some(a => a.cam)))) }, Date.now());
     const local = cam.interfaceReading, T = decisions.table;
     if (result.ready && local && T && T.seats.length === 5 && Date.now() - (cam.interfaceAt || 0) < 900) {
       const mismatch = Object.entries(local.contributions || {}).some(([seat,value]) => Math.abs(T.seats[seat].bet - value) > 0.011) ||
@@ -1877,22 +1879,19 @@
     const c = state.controls || decisions.current;
     const heading = `Your turn · ${c.action === 'check' ? 'Check available' : 'Call ' + c.toCall}`;
     const rec = state.ready ? currentRecommendation() : null;
-    const detail = !state.ready ? state.issues.join(' ') : rec ? `${rec.label}${rec.sizeText ? ' ' + rec.sizeText : ''} — ${rec.reasons[0] || ''}` : 'Calculating your decision…';
-    const uncertain = state.issues.some(x => x.includes('Earlier betting'));
-    const history = uncertain ? `<details><summary>Review action history</summary><p>${esc(hand.m.street.filter(Boolean).map((st,i) => `${STEP[i]}: ${st.actions.map(a => `${SC.seatName(scenario,a.seat)} ${a.text}`).join('; ')}`).join(' · '))}</p><button type="button" data-confirm-history>Confirm this history</button></details>` : '';
-    const html = `<strong>${esc(heading)}</strong><p>${esc(detail)}</p>${history}`;
+    const detail = !state.ready ? 'Updating the table automatically. Advice below uses the last tracked state. ' + state.issues.join(' ') : rec ? `${rec.label}${rec.sizeText ? ' ' + rec.sizeText : ''} — ${rec.reasons[0] || ''}` : 'Calculating your decision…';
+    const html = `<strong>${esc(heading)}</strong><p>${esc(detail)}</p>${state.warnings?.length ? `<p class="note">${esc(state.warnings.join(' '))}</p>` : ''}`;
     if (box.innerHTML !== html) box.innerHTML = html;
     if (rec) { const version = decisions.version; requestAnimationFrame(() => requestAnimationFrame(() => { if (version === decisions.version && decisionValidation().ready) decisions.painted(Date.now()); })); }
   }
-  $('decisionNow').addEventListener('click', e => { if (e.target.closest('[data-confirm-history]')) { cam.confirmedHistory = historySignature(); renderDecision(); scheduleRender(); } });
   function observeDecisionTable(T, capturedAt) {
     if (cam.joinedMidHand === null && T.readable?.betting && Array.isArray(T.board)) {
       const bb = T.unit === 'bb' ? 1 : T.blinds?.big || scenario.bigBlind;
       cam.joinedMidHand = T.board.length > 0 || T.seats.some(s => s.bet > bb);
     }
     decisions.observeTable(T, capturedAt);
-    // A local detector owns turn visibility while that profile is selected.
-    if (cam.profile === 'generic' && T.controls) decisions.observe(T.controls, capturedAt, 'ai');
+    // Fall back to AI whenever local controls are missing or stale.
+    if (!(decisions.current?.source === 'local' && Date.now() - decisions.current.capturedAt < 900) && T.controls) decisions.observe(T.controls, capturedAt, 'ai');
     if (decisions.current && T.controls?.active && T.toAct !== 0) {
       // Preserve the contradiction instead of replacing one witness with the other.
       camNote('Action controls and seat indicator disagree; checking again.', false, true);
@@ -1921,12 +1920,11 @@
         cam.interfaceReading = data.result; cam.interfaceAt = data.at;
         const before = decisions.version;
         const fresh = decisions.observe(data.result.controls, data.at, 'local');
-        if (before !== decisions.version) { adviceClient.cancel(); cameraRequests.cancel(); urgentToken++; urgentBusy = false; urgentLast = 0; scheduleRender(); }
-        if (data.result.controls?.active && !decisions.current) requestUrgent();
-        if (fresh || (decisions.current && !decisionValidation().ready)) requestUrgent();
+        if (before !== decisions.version) scheduleRender(); // OCR noise must never cancel table reads or advice.
+        if (fresh) requestUrgent();
         renderDecision();
       };
-      worker.onerror = () => { stopInterfaceWorker(); camNote('Local screen recognition unavailable; use automatic AI or restart the camera.', true); };
+      worker.onerror = () => { stopInterfaceWorker(); camNote('Local screen recognition unavailable; automatic AI tracking continues.', true); };
     } catch (e) { camNote('Local screen recognition unavailable in this browser.', true); }
     interfaceLoop();
     cam.decisionWatch = setInterval(() => { if (cam.stream) { renderDecision(); if (decisions.current && !decisionValidation().ready) requestUrgent(); } }, 250);
@@ -1956,9 +1954,9 @@
   }
   async function requestUrgent() {
     if (cam.source === 'events' || !$('camBets').checked || $('camVideo').paused || document.hidden) return;
-    if (urgentBusy || !aiReady() || !(cam.sourceCv || cam.fullCv) || Date.now() - urgentLast < 650) return;
+    if (urgentBusy || !aiReady() || !(cam.sourceCv || cam.fullCv) || Date.now() - urgentLast < 1500 || cameraRequests.active.size > 0) return;
     const session = cam.session, token = ++urgentToken, started = Date.now(); urgentLast = started; urgentBusy = true;
-    cameraRequests.cancel(); // A full-table housekeeping read must not block an expiring decision.
+    // Let an existing table read finish; repeated OCR changes used to starve tracking.
     try {
       const full = !cam.live.fullAt || cam.live.seatMiss >= 2 || !!cam.live.planKey;
       const T = await cameraRequest('/api/cards/table', async () => ({
@@ -2019,7 +2017,7 @@
 
   // ----- the camera loop -----
   async function startCamera(source = 'camera', file = null) {
-    const session = ++cam.session; cameraRequests.cancel(); urgentBusy = false; urgentLast = 0; cam.corners = null; cam.source = source; cam.sourceCv = null; cam.interfaceReading = null; cam.interfaceHistory = {}; cam.interfaceAt = 0; cam.joinedMidHand = null; cam.confirmedHistory = null;
+    const session = ++cam.session; cameraRequests.cancel(); urgentBusy = false; urgentLast = 0; cam.corners = null; cam.source = source; cam.sourceCv = null; cam.interfaceReading = null; cam.interfaceHistory = {}; cam.interfaceAt = 0; cam.joinedMidHand = null;
     $('camOff').hidden = true; $('camOn').hidden = false; camNote('Starting the camera… allow access if your browser asks.');
     $('camBetsRow').hidden = $('camSync').hidden = $('camAiCardsRow').hidden = !(HV && HV.api.has('vision'));
     if (source === 'camera' && (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)) { camNote(window.isSecureContext ? 'This browser has no camera access.' : 'The camera needs a secure (https) page.', true); return; }
@@ -2568,8 +2566,9 @@
   let lastAdvice = null; // {key: deal:street, html}: the advice last shown for this street
   function adviceBlock(S) {
     const r = currentRecommendation();
-    if (!r) return `<section class="blk advice"><h3>What you should do</h3><p>${esc(cam.stream && !decisionValidation().ready ? decisionValidation().issues.join(' ') : 'Calculating the current decision…')}</p></section>`;
+    if (!r) return `<section class="blk advice"><h3>What you should do</h3><p>${esc(adviceClient.error || 'Calculating the current decision…')}</p></section>`;
     const cls = ACT_CLS[r.action];
+    const cameraNote = cam.stream && !decisionValidation().ready ? '<p class="note">Based on the last tracked table; automatic tracking is updating. Earlier actions may be inferred.</p>' : '';
     if (r.preview) {
       // not your turn: what to do when the action reaches you
       const first = r.preview[0];
@@ -2579,7 +2578,7 @@
         <p class="note">${esc(r.reasons[0] || '')}</p>
         <div class="pv">${rows || '<p class="note">Nothing to decide until the others act.</p>'}</div>
         ${first ? `<div class="gauge" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${first.gauge}" aria-label="${esc(first.when)}: from fold to raise"><span>Fold</span><span>Check · Call</span><span>Bet · Raise</span><i style="left:${first.gauge}%"></i></div>
-        <ul class="adv-why">${first.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}${r.note ? `<p class="note">${esc(r.note)}</p>` : ''}${handLine(S)}</section>`;
+        <ul class="adv-why">${first.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}${r.note ? `<p class="note">${esc(r.note)}</p>` : ''}${cameraNote}${handLine(S)}</section>`;
     }
     const pot = hand.m.potShow[step];
     const size = !r.size ? '' : r.action === 'raise' ? `to ${money(r.size)}` : `${money(r.size)} · about ${Math.round(r.size / pot * 100)}% of the pot`;
@@ -2587,7 +2586,7 @@
       <div class="adv-top"><span class="adv-act">${esc(r.label)}</span>${size ? `<span class="adv-size">${size}</span>` : ''}${r.close ? '<span class="chip">close call</span>' : ''}</div>
       <div class="gauge" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${r.gauge}" aria-label="Recommendation strength from fold to raise"><span>Fold</span><span>Check · Call</span><span>Bet · Raise</span><i style="left:${r.gauge}%"></i></div>
       ${r.ev ? evList(r.ev) : ''}
-      <ul class="adv-why">${r.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>${r.note ? `<p class="note">${esc(r.note)}</p>` : ''}${handLine(S)}</section>`;
+      <ul class="adv-why">${r.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>${r.note ? `<p class="note">${esc(r.note)}</p>` : ''}${cameraNote}${handLine(S)}</section>`;
   }
   // What each choice is worth (chips you can expect to win or lose from here), best first.
   function evList(ev) {
@@ -2662,7 +2661,7 @@
       // finished, the last advice for it stays up, rather than the table's guess about where the hand is.
       const akey = `${scenario.deal}:${step}`;
       if (step !== m.frontier && lastAdvice && lastAdvice.key === akey) html += lastAdvice.html;
-      else if (S) { const a = adviceBlock(S); if (step === m.frontier) lastAdvice = { key: akey, html: a }; html += a; }
+      else if (!scenario.heroHidden) { const a = adviceBlock(S); if (step === m.frontier && adviceClient.result) lastAdvice = { key: akey, html: a }; html += a; }
       else html += blk('What you should do', `<p class="note calc">Reading the spot…</p>${handLine(S)}`);
       const vs = vsLabel(step), live = liveSeats(step).length;
       if (!S) { /* the numbers are on their way */ }

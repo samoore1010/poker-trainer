@@ -14,11 +14,11 @@ If filming a screen at an angle, choose **Frame source screen**, then click top 
 
 ## What happens on your turn
 
-1. Confirm local controls across distinct frames at least 70 ms apart. A new call price immediately invalidates the preceding decision. Control disappearance or uncertainty clears actionable advice; local observations expire after 900 ms without a new frame.
-2. Preempt an outstanding housekeeping request and send an urgent read from the full source. Follow-up reads retain bounded concurrency and a minimum interval. Obsolete session, rotation, crop, source-profile and hand responses cannot update the current decision.
+1. Confirm local controls across distinct frames at least 70 ms apart. A new call price immediately invalidates the preceding decision. Control disappearance or uncertainty clears the urgent turn strip; dashboard advice remains labeled with its tracked state. local observations expire after 900 ms without a new frame.
+2. Allow outstanding table requests to finish, then send an urgent read from the full source if reconciliation is still needed. Follow-up reads retain bounded concurrency and a minimum interval. Obsolete session, rotation, crop, source-profile and hand responses cannot update the current decision.
 3. Cross-check the button price against highest contribution minus hero contribution, all contributions, folded players, known stacks, cards, pot and seat turn. Contradictions identify what is being reread. A missing folded player's name is not required for advice.
 4. Use a dedicated advice worker. Preflop charts do not wait for an equity simulation; postflop equity and action-value evaluation run off the UI thread. New scenario jobs terminate obsolete advice jobs. Background equity charts use a different worker. A bounded cache reuses exact decision states, including work computed before controls are confirmed.
-5. Display the current turn and call price immediately. Display the recommendation only after validation. Missing earlier streets or joining after a raise can require reviewing and confirming the reconstructed history. Confirmation does not erase inferred-action markers or fabricate missing actions.
+5. Display the current turn and call price immediately. Keep dashboard advice available from the tracked scenario while recognition updates automatically. The urgent turn strip requires coherent current observations; inferred earlier actions are warnings and never require manual confirmation. Uncertain dashboard advice is labeled as based on the last tracked table.
 
 The decision tracker stores timestamped observations and events separately from scenario mutation. Events distinguish control changes, active turns, contribution increases (with optional stack-delta corroboration), folds, chip sweeps, board growth, seat-map changes and new-hand candidates. A candidate hand transition is not alone permission to award a pot or invent a showdown. Existing card/hand reconciliation continues to require its confirmation checks.
 
@@ -87,3 +87,5 @@ const status = source.push({
 ## Limits
 
 The Pure profile is intentionally narrow. Its OCR thresholds and rank-patch geometry are starting values tested with synthetic fixtures, not a trained general detector or a promise of live-video accuracy. Other card layouts use the existing recognizer or AI. Card/pot observations can remain unavailable under occlusion. Full AI reads now preserve controls at the cost of a larger image; real recordings and provider latency measurements should guide further crop packing and model selection. No runtime model defaults were changed based on unmeasured speed claims.
+
+Automatic recovery: repeated unchanged scenario refreshes keep the advice worker running. Local control changes never cancel table requests. Urgent reads wait for an existing read to finish and retry no faster than every 1.5 seconds. If the advice worker fails or times out, a compatibility calculation runs on the main thread (which may briefly delay UI updates).

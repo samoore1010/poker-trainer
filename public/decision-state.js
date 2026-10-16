@@ -9,25 +9,28 @@
   const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   class Tracker {
     constructor() { this.reset(); }
-    reset() { this.version = 0; this.current = null; this.candidate = null; this.lastFrame = -1; this.table = null; this.events = []; this.samples = []; this.paintedVersion = null; }
+    reset() { this.version = 0; this.current = null; this.candidate = null; this.lastFrame = -1; this.sourceFrames = {}; this.table = null; this.events = []; this.samples = []; this.paintedVersion = null; }
     event(type, at, detail = {}) {
       this.events.push({ type, at, ...detail }); if (this.events.length > 200) this.events.shift();
     }
     observe(controls, at, source = 'local') {
-      if (!Number.isFinite(at) || at <= this.lastFrame) return false;
-      this.lastFrame = at;
+      if (!Number.isFinite(at) || at <= (this.sourceFrames[source] ?? -1)) return false;
+      this.sourceFrames[source] = at; this.lastFrame = Math.max(this.lastFrame, at);
       const valid = controls && controls.active === true && controls.enabled === true &&
         controls.confidence >= 0.85 && amount(controls.toCall) && ['call', 'check'].includes(controls.action);
       if (!valid) {
+        // Missing local OCR must not erase an independently observed AI turn.
+        if (source === 'local' && (this.current?.source === 'ai' || this.candidate?.source === 'ai')) return false;
         if (this.current) this.event('decision_unavailable', at);
         if (this.current || this.candidate) this.version++;
         this.current = null; this.candidate = null;
         return false;
       }
+      if (this.current && at < this.current.capturedAt) return false;
       const key = `${controls.action}:${controls.toCall}:${controls.unit || 'unknown'}`;
       if (!this.candidate || this.candidate.key !== key) {
         this.current = null; this.version++;
-        this.candidate = { key, at, count: 1 };
+        this.candidate = { key, at, count: 1, source };
         this.event('controls_changed', at, { toCall: controls.toCall });
         if (source !== 'structured') return false;
       }
@@ -90,8 +93,8 @@
       if (!near(model.toCall, call) || model.next !== 0) issues.push('Reconciling the current decision with betting history.');
       if (!amount(T.pot) || !near(model.pot, T.pot * (k || 1))) issues.push('Confirming the pot.');
       if (!T.cardsAt || now - T.cardsAt > 4000 || !T.hero || !equal(T.hero, model.hero) || !Array.isArray(T.board) || !equal(T.board, model.board)) issues.push('Confirming your cards and the board.');
-      if (model.historyUncertain) issues.push('Earlier betting was not observed; confirm the action history.');
-      return { ready: !issues.length, issues, controls: c, toCall: call, pot: T.pot, version: this.version };
+      const warnings = model.historyUncertain ? ['Earlier actions were inferred automatically.'] : [];
+      return { ready: !issues.length, issues, warnings, controls: c, toCall: call, pot: T.pot, version: this.version };
     }
     painted(now) {
       if (!this.current || this.paintedVersion === this.version) return;

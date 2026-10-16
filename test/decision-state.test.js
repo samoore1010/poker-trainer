@@ -20,9 +20,10 @@ test('disabled buttons, uncertainty, changed call price, stale frames and stale 
   t.observe(controls, 1100); assert.equal(t.current, null);
   t.observe({ ...controls, enabled: false }, 1300); assert.equal(t.current, null);
 });
-test('call price disagreement and missing history cannot produce confident advice', () => {
+test('call price disagreement blocks validation but inferred history needs no manual confirmation', () => {
   const t = ready();
-  assert.equal(t.validate({ ...model, historyUncertain: true }, 1200).ready, false);
+  assert.equal(t.validate({ ...model, historyUncertain: true }, 1200).ready, true);
+  assert.match(t.validate({ ...model, historyUncertain: true }, 1200).warnings[0], /inferred automatically/);
   const bad = table(); bad.seats[1].bet = 40; t.observeTable(bad, 1200);
   assert.match(t.validate(model, 1200).issues.join(), /disagree/);
 });
@@ -69,4 +70,17 @@ test('a betting-only read preserves recent card evidence without refreshing its 
   t.observeTable(T,1300);assert.equal(t.validate(model,1400).ready,true);
   t.observe(controls,5000);t.observeTable(T,5000);
   assert.equal(t.validate(model,5200).ready,false);
+});
+
+test('missing local OCR does not starve independent AI turn observations', () => {
+  const t = new Tracker();
+  t.observe(null, 1500, 'local');
+  t.observe(controls, 1000, 'ai');
+  t.observe(null, 1700, 'local');
+  t.observe(controls, 1200, 'ai');
+  assert.equal(t.current.source, 'ai');
+  t.observe(null, 1800, 'local');
+  assert.equal(t.current.source, 'ai');
+  t.observe(null, 1300, 'ai');
+  assert.equal(t.current, null);
 });
