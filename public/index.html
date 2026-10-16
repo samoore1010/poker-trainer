@@ -592,6 +592,7 @@
 <script src="scenario.js"></script>
 <script src="voice.js"></script>
 <script src="vision.js"></script>
+<script src="camera-pipeline.js"></script>
 <script>
 (function () {
   'use strict';
@@ -694,6 +695,7 @@
   // goes to the winner(s), stacks carry over, the button moves on, and your new cards stay face down until they're read.
   let lastResult = store.get('walkthrough.lastResult');
   function nextHand() {
+    cameraRequests.cancel();
     pendingFlop = [null, null, null]; pendingHero = [null, null]; autoRun++; pushUndo(); lastReply = null;
     recordStats(); // what each player did this hand, before the rest is played out by the computer
     const res = SC.settleHand(scenario, { hero: hand.hero, opps: hand.opps, board: hand.board });
@@ -715,6 +717,7 @@
   }
   const statsOf = o => statsBook[o.name.toLowerCase()] || null;
   function resetTable() {
+    cameraRequests.cancel();
     pendingFlop = [null, null, null]; pendingHero = [null, null]; autoRun++; pushUndo(); lastReply = null; lastResult = null; store.set('walkthrough.lastResult', null);
     const n = scenario.opponents.length, bb = scenario.bigBlind;
     loadScenario(SC.create({ opponents: n, bigBlind: bb, smallBlind: scenario.smallBlind, stack: 100 * bb }), { prev: null });
@@ -1302,6 +1305,14 @@
   const cam = { stream: null, timer: 0, canvas: null, four: false, seen: [], local: null, localKey: '', localSince: 0, lock: null,
     prevThumb: null, thumbNow: null, asked: null, still: 0, needCheck: false, ai: { busy: false, last: 0, calls: 0, fails: 0, offUntil: 0 },
     hold: null, betNote: '', betAt: 0, sync: null, synced: false, syncBusy: false, quality: null, qAt: 0, flash: null };
+  cam.session = 0;
+  const cameraContext = () => `${cam.session}:${cam.cropVer || 0}:${cam.rot || 0}:${scenario.deal}:${!!cam.stream}`;
+  const cameraRequests = new CameraPipeline.Requests(cameraContext);
+  const cameraRequest = (path, options) => cameraRequests.run(async signal => {
+    const prepared = typeof options === 'function' ? await options() : options;
+    if (signal.aborted) throw new DOMException('Camera request cancelled', 'AbortError');
+    return HV.api.request(path, { ...prepared, signal });
+  });
   const cardsTxt = cs => cs.map(c => E.cardText(E.cardFromCode(c))).join(' ');
   const sameCards = (a, b) => !!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]);
   const readKey = r => `${r.hero ? r.hero.join(' ') : '-'}|${r.board ? r.board.join(' ') : '?'}`;
@@ -1435,15 +1446,24 @@
   }
 
   // ----- the AI check (in the background) -----
-  const frameJpeg = q => cam.canvas.toDataURL('image/jpeg', q || 0.85);
+  function jpeg(canvas, quality) {
+    return new Promise((resolve, reject) => canvas.toBlob(blob => {
+      if (!blob) return reject(new Error('Could not encode camera frame'));
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result); reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    }, 'image/jpeg', quality));
+  }
+  const frameJpeg = q => jpeg(cam.canvas, q || 0.85);
   async function readWithAI() {
-    const a = await HV.api.request('/api/cards/vision', { body: JSON.stringify({ image: frameJpeg() }), headers: { 'Content-Type': 'application/json' } });
+    const a = await cameraRequest('/api/cards/vision', async () => ({ body: JSON.stringify({ image: await frameJpeg() }), headers: { 'Content-Type': 'application/json' } }));
     cam.ai.calls++; cam.ai.fails = 0;
     noteRotation(a.rotate);
     if (!a.hero && !a.board) return null;
     return { hero: a.hero || null, board: a.board, unsure: a.unsure || [] };
   }
   async function askAI() {
+    const session = cam.session;
     cam.ai.busy = true; cam.ai.last = Date.now(); cam.asked = cam.thumbNow; cam.needCheck = false; renderCamRead();
     try {
       let A = await readWithAI();
@@ -1455,11 +1475,12 @@
         A = B;
       }
       decide(A, 'ai');
-    } catch (e) { aiFailed(e); } finally { cam.ai.busy = false; renderCamRead(); }
+    } catch (e) { aiFailed(e); } finally { if (session === cam.session) { cam.ai.busy = false; renderCamRead(); } }
   }
   // A failed AI reading never holds up the camera's own: after two failures in a row the AI rests (15 s, then longer
   // each time, up to 2 min; a setup problem like a bad key rests it 5 min) and the camera reads alone meanwhile.
   function aiFailed(e) {
+    if (e.name === 'AbortError') return;
     cam.ai.fails++;
     const setup = ['llm_auth', 'llm_model', 'llm_error', 'vision_not_configured'].includes(e.code) || e.status === 401 || e.status === 403;
     let rest = 0;
@@ -1476,15 +1497,15 @@
   }
 
   // ----- following the table live -----
-  // With "Follow the table live" on, the AI reads the table continuously, up to three readings in flight so a fresh one
-  // lands every fraction of a second. Two kinds of reading:
+  // With "Follow the table live" on, one AI reading is in flight, with follow-up reads
+  // for confirmation and periodic recovery. Two kinds of reading:
   //   short (most of them): bets, folds, whose turn, pot and cards as short arrays, from a picture cropped to the table
   //     and scaled down: a short answer is a fast answer
   //   full (every 10 s, at the start of each hand, and whenever the seats stop matching): names, stacks, the dealer, the
   //     blinds and where the table is in the picture (for the crop)
   // Each reading is applied as it lands, newest wins:
-  //   betting: the missing actions are played in turn order (PokerScenario.trackTable), one at a time so the chips and
-  //     the turn move as they would at the table; folds the table had filled in as calls are corrected. When two
+  //   betting: missing actions are inferred in turn order (PokerScenario.trackTable), then committed together.
+  //     Folds the table had filled in as calls are corrected. When two
   //     readings in a row disagree with the table, the camera wins: the street is rebuilt from the picture
   //     (PokerScenario.rebuildFrom)
   //   seats (full readings): names follow once two readings agree; stacks while the betting matches; the dealer and
@@ -1492,15 +1513,15 @@
   //   cards: as with the AI check (a change to cards already on the table needs two readings in a row)
   const liveOn = () => aiReady() && $('camBets').checked;
   const aiCards = () => aiReady() && $('camAiCards').checked; // the AI double-checks the cards (else the phone's reading stands alone)
-  const FULL_EVERY = 6000; // the full reading (players, names, stacks, dealer): the table setup follows the camera
-  function pumpLive() {
+  const FULL_EVERY = 10000; // the full reading (players, names, stacks, dealer): the table setup follows the camera
+  function pumpLive(changed) {
     const L = cam.live, now = Date.now();
-    if (cam.still < 1) return; // mid-motion frames (chips flying) read badly
+    if (cam.still < 1 || L.inflight || cam.syncBusy) return;
     const fresh = scenario.streets.every(st => st.actions.every(a => a.filled || a.auto));
-    const wantFull = !L.fullBusy && (!L.fullAt || now - L.fullAt > FULL_EVERY || (fresh && L.fullHand !== hand.deal) || L.seatMiss >= 2);
-    if (wantFull && L.inflight < 3) return askLive('full');
-    if (L.inflight >= 3 || now - L.lastSent < Math.max(300, (L.ms || 900) / 3)) return;
-    askLive(L.fullAt ? 'short' : 'full');
+    const wantFull = !L.fullAt || now - L.fullAt > FULL_EVERY || (fresh && L.fullHand !== hand.deal) || L.seatMiss >= 2 || !!L.planKey;
+    if (!CameraPipeline.shouldRead({ inflight: L.inflight, changed: changed || wantFull,
+      confirming: L.confirmLeft > 0, lastSent: L.lastSent, now })) return;
+    askLive(wantFull ? 'full' : 'short');
   }
   // the picture for a reading: short reads are cropped to the table (learned from the last full read) and scaled down
   function liveImage(kind) {
@@ -1511,51 +1532,55 @@
     const c = cam.liveCanvas || (cam.liveCanvas = document.createElement('canvas'));
     c.width = Math.round(sw * k); c.height = Math.round(sh * k);
     c.getContext('2d').drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
-    return c.toDataURL('image/jpeg', kind === 'short' ? 0.75 : 0.85);
+    return jpeg(c, kind === 'short' ? 0.85 : 0.9);
   }
   async function askLive(kind) {
     const L = cam.live, seq = ++L.seq, t0 = Date.now(), ver = cam.cropVer || 0;
-    L.inflight++; L.lastSent = t0; cam.asked = cam.thumbNow; cam.needCheck = false;
+    L.inflight++; L.confirmLeft = Math.max(0, (L.confirmLeft || 0) - 1); L.lastSent = t0; cam.asked = cam.thumbNow; cam.needCheck = false;
     if (kind === 'full') L.fullBusy = true;
     try {
-      const body = kind === 'full' ? { image: liveImage('full'), fast: true, scale: tableScale() } : { image: liveImage('short'), live: true, seats: scenario.opponents.length + 1, cards: aiCards(), scale: tableScale() };
-      const T = await HV.api.request('/api/cards/table', { body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
+      const T = await cameraRequest('/api/cards/table', async () => {
+        const image = await liveImage(kind);
+        const body = kind === 'full' ? { image, fast: true, scale: tableScale() }
+          : { image, live: true, seats: scenario.opponents.length + 1, cards: aiCards(), scale: tableScale() };
+        return { body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } };
+      });
       cam.ai.calls++; cam.ai.fails = 0;
       const ms = Date.now() - t0;
       if (kind === 'short') L.ms = L.ms ? L.ms * 0.7 + ms * 0.3 : ms; else L.fullMs = L.fullMs ? L.fullMs * 0.7 + ms * 0.3 : ms;
-      if (!cam.stream) return;
+      if (!cam.stream || L !== cam.live || seq < L.applied) return;
       if (kind === 'full') { L.fullAt = Date.now(); L.fullHand = hand.deal; if (T.readable.seats) { cam.seenPlayers = T.seats.length; followSeats(plausible(T), L.inSync); } L.seatMiss = 0; if (ver === (cam.cropVer || 0)) { if (T.box) L.box = T.box; noteTableBox(T); } } // (a box found in the picture before a new crop is stale)
       if (seq < L.applied) return; // a newer reading has already been applied: its betting and cards are fresher
       L.applied = seq; L.at = Date.now(); L.reads++;
       applyLive(T, t0);
     } catch (e) { aiFailed(e); } finally { L.inflight--; if (kind === 'full') L.fullBusy = false; renderCamRead(); }
   }
-  // While actions are being played onto the table one by one, newer readings wait for it (the latest one only).
   // ----- amounts that can't be right -----
   // The AI is told the table's scale (the blinds, the stacks), so a misplaced decimal point stands out to it.
   function tableScale() {
     const stacks = [scenario.hero.stack].concat(scenario.opponents.map(o => o.stack)).filter(x => x > 0);
     return { sb: scenario.smallBlind || scenario.bigBlind / 2, bb: scenario.bigBlind, lo: stacks.length ? Math.min(...stacks) : 0, hi: stacks.length ? Math.max(...stacks) : 0 };
   }
-  // A bet bigger than everything the player had when the hand began can't have happened: it's a misread, most often a
-  // lost decimal point ($0.53 read as 53). Divided by 100 it fits? Then that's what it was. Otherwise the bet is
-  // dropped from the reading (the last one seen stands), and the same for the pot (more than everyone's chips).
+  // Impossible amounts are unknown, never silently rescaled to a plausible value.
   function plausible(T) {
     if (!T.seats || T.seats.length !== scenario.opponents.length + 1) return T;
-    const k = T.unit === 'bb' ? scenario.bigBlind : 1, had = [scenario.hero.stack].concat(scenario.opponents.map(o => o.stack));
-    const fixes = [], fit = (v, max) => (v * k <= max + 1e-9 ? v : v / 100 * k <= max + 1e-9 ? (fixes.push(`${money(v * k)} → ${money(v / 100 * k)}`), v / 100) : null);
-    const seats = T.seats.map((x, i) => {
-      // a stack about a hundred times this seat's (a lost decimal point) is read as the hundredth
-      if (x.stack > 0 && had[i] > 0 && x.stack * k > 50 * had[i] && x.stack / 100 * k <= 3 * had[i]) { fixes.push(`stack ${money(x.stack * k)} → ${money(x.stack / 100 * k)}`); x = { ...x, stack: x.stack / 100 }; }
-      if (!x.bet) return x;
-      const v = fit(x.bet, had[i]);
-      if (v === null) { fixes.push(`ignored ${money(x.bet * k)} for ${i === 0 ? 'you' : scenario.opponents[i - 1].name} (more than their chips)`); return { ...x, bet: cam.mem && cam.mem.bets && cam.mem.bets[i] != null ? cam.mem.bets[i] : 0 }; }
-      return v === x.bet ? x : { ...x, bet: v };
-    });
+    const k = T.unit === 'bb' ? scenario.bigBlind : 1;
+    const had = [scenario.hero.stack].concat(scenario.opponents.map(o => o.stack));
+    const seats = T.seats.map((x, i) => ({ ...x,
+      bet: x.bet !== null && x.bet * k <= had[i] + 1e-9 ? x.bet : null,
+      stack: x.stack > 50 * Math.max(had[i], scenario.bigBlind) ? null : x.stack,
+    }));
     const all = had.reduce((a, b) => a + b, 0) + (scenario.potFix || []).reduce((a, b) => a + b, 0);
-    const pot = T.pot ? fit(T.pot, all) : T.pot;
-    if (fixes.length) camNote(`Amounts that couldn't be right: ${fixes.join(', ')}.`, false, true);
-    return { ...T, seats, pot: pot === null ? null : pot };
+    const pot = T.pot !== null && T.pot * k <= all + 1e-9 ? T.pot : null;
+    const invalid = seats.some(x => x.bet === null);
+    if (invalid || (T.pot !== null && pot === null)) {
+      cam.needCheck = true;
+      if (cam.live) cam.live.confirmLeft = Math.max(cam.live.confirmLeft || 0, 2);
+      camNote('An amount is unclear or exceeds the available chips; waiting for another reading.', false, true);
+    }
+    return { ...T, seats, pot, readable: { ...T.readable,
+      betting: T.readable.betting && !invalid,
+      stacks: T.readable.stacks && seats.every(x => x.stack !== null) } };
   }
 
   // ----- your corrections come first -----
@@ -1597,7 +1622,6 @@
     }
   }
   function applyLive(T, capturedAt) {
-    if (cam.anim) { cam.pendingLive = [T, capturedAt]; return; }
     noteRotation(T.rotate);
     const street = aiCards() && T.readable.cards && T.board ? BOARD_N.indexOf(T.board.length) : Math.max(0, BOARD_N.indexOf(scenario.board.length));
     // the readings before this one count too (bets confirmed by two in a row, swept chips remembered, folds by majority);
@@ -1682,25 +1706,12 @@
     if (rebuilt || res.repaired) { loadScenario(res.sc); syncLock(); flashSeats([0].concat(scenario.opponents.map((_, i) => i + 1))); return done(); }
     animateTo(res.sc, done);
   }
-  // One action at a time, about a quarter of a second apart: the chips slide in, the bubble changes and the turn moves on.
+  // Commit the complete observation immediately. Visual highlights never delay state or stats.
   function animateTo(target, then) {
-    const start = scenario.streets.map(st => st.actions.length), steps = [];
-    target.streets.forEach((st, k) => st.actions.slice(start[k]).forEach(a => steps.push([k, a])));
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (steps.length <= 1 || reduce) { loadScenario(target); syncLock(); flashSeats(steps.map(x => x[1].seat)); return then(); }
-    const run = ++autoRun; cam.anim = true;
-    const base = SC.clone(scenario);
-    let i = 0;
-    const tick = () => {
-      if (run !== autoRun || !cam.stream) { cam.anim = false; loadScenario(target); syncLock(); return then(); } // interrupted: jump to the end
-      const [k, a] = steps[i++];
-      base.streets[k].actions.push(a); if (k > base.street) base.street = k;
-      loadScenario(SC.clone(base)); syncLock(); flashSeats([a.seat]);
-      if (i < steps.length) { setTimeout(tick, 260); return; }
-      loadScenario(target); syncLock(); cam.anim = false; then();
-      if (cam.pendingLive) { const [T, at] = cam.pendingLive; cam.pendingLive = null; applyLive(T, at); }
-    };
-    tick();
+    const start = scenario.streets.map(st => st.actions.length), seats = [];
+    target.streets.forEach((st, k) => st.actions.slice(start[k]).forEach(a => seats.push(a.seat)));
+    loadScenario(target); syncLock(); flashSeats([...new Set(seats)]);
+    then();
   }
   // The table is set up from the camera: who's sitting where (players come and go), names, stacks, the dealer, the
   // blinds. Names and stacks (the figures printed on the table) change at once; the players, the dealer and the blinds change
@@ -1731,10 +1742,11 @@
   // (Following the table live does this by itself every few seconds; the button is for when you want it at once.)
   // The AI reads every seat (name, stack, dealer, betting) and the cards; what it couldn't read clearly stays as it is.
   async function syncTable() {
+    const session = cam.session;
     if (!cam.canvas || cam.syncBusy) return;
     cam.syncBusy = true; $('camSync').disabled = true; camNote('Reading the whole table…');
     try {
-      const T = await HV.api.request('/api/cards/table', { body: JSON.stringify({ image: frameJpeg(0.9), scale: tableScale() }), headers: { 'Content-Type': 'application/json' } });
+      const T = await cameraRequest('/api/cards/table', async () => ({ body: JSON.stringify({ image: await frameJpeg(0.9), scale: tableScale() }), headers: { 'Content-Type': 'application/json' } }));
       cam.ai.calls++; cam.sync = T; if (T.box && cam.live) cam.live.box = T.box; // for Fit to table
       if (T.readable.seats) cam.seenPlayers = T.seats.length;
       if (!T.readable.seats) { cam.synced = false; camNote(`The camera couldn't read the seats clearly${T.problems.length ? ` (${T.problems.join('; ')})` : ''}: nothing changed.`, true); return; }
@@ -1746,8 +1758,8 @@
         camNote(`Synced: ${done.join(', ')}.`);
       } else camNote('The table already matches the camera.');
       cam.synced = true; afterSync(T);
-    } catch (e) { camNote(`Sync failed (${e.message}). The table stays as it is.`, true); }
-    finally { cam.syncBusy = false; $('camSync').disabled = false; renderCamRead(); }
+    } catch (e) { if (e.name === 'AbortError') return; camNote(`Sync failed (${e.message}). The table stays as it is.`, true); }
+    finally { if (session === cam.session) { cam.syncBusy = false; $('camSync').disabled = false; renderCamRead(); } }
   }
   // the betting and the cards from the same reading go the usual way (betting first: a new street's board would
   // otherwise settle the last one as calls)
@@ -1788,32 +1800,73 @@
   // Seats the camera just changed glow for a moment.
   function flashSeats(seats) { cam.flash = { seats: new Set(seats), until: Date.now() + 1800 }; renderTable(); setTimeout(() => { if (cam.flash && Date.now() >= cam.flash.until) { cam.flash = null; renderTable(); } }, 1900); }
 
+  // Recognition runs off the UI thread; one frame at a time prevents a stale-frame queue.
+  let visionWorker = null, visionPending = null, visionJob = 0;
+  function stopVisionWorker() {
+    if (visionWorker) visionWorker.terminate();
+    visionWorker = null;
+    if (visionPending) { visionPending.resolve(null); visionPending = null; }
+  }
+  function startVisionWorker() {
+    stopVisionWorker();
+    try {
+      visionWorker = new Worker('vision-worker.js');
+      visionWorker.postMessage({ templates: CardVision._debug.templates() });
+      visionWorker.onmessage = ({ data }) => {
+        if (!visionPending || data.id !== visionPending.id) return;
+        const p = visionPending; visionPending = null;
+        if (data.error) { stopVisionWorker(); p.resolve(null); }
+        else p.resolve(data.result);
+      };
+      visionWorker.onerror = stopVisionWorker;
+    } catch (e) { stopVisionWorker(); }
+  }
+  function analyzeFrame(px, width, height) {
+    if (!visionWorker) return Promise.resolve(CardVision.analyze(px, width, height, { fourColor: cam.four }));
+    return new Promise(resolve => {
+      const id = ++visionJob;
+      visionPending = { id, resolve };
+      try { visionWorker.postMessage({ id, pixels: px.buffer, width, height, options: { fourColor: cam.four } }, [px.buffer]); }
+      catch (e) { stopVisionWorker(); }
+    });
+  }
+
   // ----- the camera loop -----
   async function startCamera() {
+    const session = ++cam.session; cameraRequests.cancel();
     $('camOff').hidden = true; $('camOn').hidden = false; camNote('Starting the camera… allow access if your browser asks.');
     $('camBetsRow').hidden = $('camSync').hidden = $('camAiCardsRow').hidden = !(HV && HV.api.has('vision'));
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camNote(window.isSecureContext ? 'This browser has no camera access.' : 'The camera needs a secure (https) page.', true); return; }
     try {
       await CardVision.init();
-      cam.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+      if (session !== cam.session) return;
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+      if (session !== cam.session) { stream.getTracks().forEach(t => t.stop()); return; }
+      cam.stream = stream;
     } catch (e) {
+      if (session !== cam.session) return;
       camNote(e && e.name === 'NotAllowedError' ? 'Camera access is blocked for this site. Allow it in the site settings (the icon by the address bar), then try again.' : e && e.name === 'NotFoundError' ? 'No camera was found.' : `The camera could not start${e && e.message ? `: ${e.message}` : ''}.`, true);
       return;
     }
     const v = $('camVideo'); v.srcObject = cam.stream; try { await v.play(); } catch (e) {}
+    if (session !== cam.session || !cam.stream) return;
     $('camDot').classList.add('on');
-    Object.assign(cam, { seen: [], four: false, local: null, lock: null, asked: null, prevThumb: null, hold: null, needCheck: false, betNote: '', betAt: 0, seatNote: '', sync: null, synced: false, quality: null, rotVotes: [],
-      anim: false, pendingLive: null,
+    Object.assign(cam, { syncBusy: false, seen: [], four: false, local: null, lock: null, asked: null, prevThumb: null, hold: null, needCheck: false, betNote: '', betAt: 0, seatNote: '', sync: null, synced: false, quality: null, rotVotes: [],
       live: { seq: 0, applied: 0, inflight: 0, lastSent: 0, at: 0, reads: 0, ms: 0, fullMs: 0, fullAt: 0, fullHand: null, fullBusy: false, box: null, seatMiss: 0, inSync: false, bad: 0, changeAt: 0, changedTable: false, lag: 0, lagAvg: 0, planKey: '', fixKey: '' } });
+    cam.ai.busy = false; cam.localKey = ''; cam.cardHistory = {}; cam.mem = null; cam.newPair = null; cam.qAt = 0; $('camSync').disabled = false;
     camNote('Point it at the table so the cards fill most of the picture. Hold steady.');
-    renderCamRead(); camLoop();
+    startVisionWorker(); renderCamRead(); camLoop();
   }
   function stopCamera() {
+    cam.session++; cameraRequests.cancel(); stopVisionWorker();
+    cam.syncBusy = false; cam.ai.busy = false;
+    if (cam.videoFrame != null && $('camVideo').cancelVideoFrameCallback) $('camVideo').cancelVideoFrameCallback(cam.videoFrame);
     clearTimeout(cam.timer); cam.timer = 0;
     if (cam.stream) cam.stream.getTracks().forEach(t => t.stop());
     cam.stream = null; $('camVideo').srcObject = null; $('camDot').classList.remove('on'); $('prog').classList.remove('steady'); $('camOn').hidden = true; $('camOff').hidden = false; cam.synced = false;
   }
-  function camLoop() {
+  async function camLoop() {
+    const context = cameraContext();
     if (!cam.stream) return;
     const v = $('camVideo'), t0 = performance.now();
     if (v.videoWidth && !document.hidden) {
@@ -1834,24 +1887,35 @@
         upright(f.getContext('2d'), kf, 0, 0);
       }
       const px = g.getImageData(0, 0, W, H).data;
-      let r = null; try { r = CardVision.analyze(px, W, H, { fourColor: cam.four }); } catch (e) { console.warn(e); }
-      if (r && r.fourColor && !cam.four) cam.four = true; // the screen being filmed uses a four-colour deck: suits are read by colour
+      const pic = updateThumb(px, W, H);
+      // Compute quality before transferring the pixel buffer to the worker.
+      if (Date.now() - cam.qAt > 1000) { cam.qAt = Date.now(); cam.quality = pictureCheck(px, W, H, cam.last); }
+      let r = null;
+      try { r = await analyzeFrame(px, W, H); } catch (e) { console.warn(e); }
+      if (!cam.stream || context !== cameraContext()) {
+        if (cam.stream && context.split(':')[0] === String(cam.session)) camLoop();
+        return;
+      }
+      if (r && r.fourColor && !cam.four) cam.four = true;
       cam.last = r;
       drawPreview($('camPrev'), r);
       if (!$('camFull').hidden) drawCropEditor();
-      if (r) onFrame(r, updateThumb(px, W, H));
-      if (Date.now() - cam.qAt > 1000) { cam.qAt = Date.now(); cam.quality = pictureCheck(px, W, H, r); }
+      if (r) onFrame(r, pic);
     }
-    cam.timer = setTimeout(camLoop, Math.max(30, 120 - (performance.now() - t0)));
+    if (!cam.stream) return;
+    cam.timer = setTimeout(() => {
+      if (!cam.stream) return;
+      if (v.requestVideoFrameCallback) cam.videoFrame = v.requestVideoFrameCallback(camLoop);
+      else camLoop();
+    }, Math.max(30, 120 - (performance.now() - t0)));
   }
   function onFrame(r, pic) {
     syncLock();
     // the on-device reading, once it has held for 3 frames, goes straight onto the table
-    const usable = r.complete && (r.hero || r.board.length);
-    const L = usable ? { hero: r.hero, board: r.board.length ? r.board : r.hero ? [] : null } : null;
+    const usable = r.heroComplete || r.boardComplete;
+    const L = CameraPipeline.stableCards(cam.cardHistory || (cam.cardHistory = {}), r);
     const key = L ? readKey(L) : null;
-    cam.seen.push(key); if (cam.seen.length > 3) cam.seen.shift();
-    const steady = key && cam.seen.length === 3 && cam.seen.every(x => x === key);
+    const steady = !!L;
     if (steady) {
       if (key !== cam.localKey) { cam.localKey = key; cam.localSince = Date.now(); }
       cam.local = L;
@@ -1861,7 +1925,7 @@
     } else if (!usable && !cam.ai.busy) camNote(aiCards() ? 'Reading with the AI…' : r.cards.length ? 'Some cards aren\'t clear yet: move a little closer or hold steadier.' : 'Point it at the table so the cards fill most of the picture.', false, true);
     // the AI looks when the fast reading put something new on the table, or the picture changed in a way the fast
     // reading can't vouch for (it can't read these cards, or the betting is being followed)
-    if (liveOn()) { if (pic.changed && !cam.live.changeAt) cam.live.changeAt = Date.now(); pumpLive(); }
+    if (liveOn()) { if (pic.changed && !cam.live.changeAt) cam.live.changeAt = Date.now(); if (pic.changed) cam.live.confirmLeft = 5; pumpLive(pic.changed); }
     else if (aiCards() && !cam.ai.busy && Date.now() - cam.ai.last > 1200 && pic.settled && (cam.needCheck || (pic.changed && (!steady || unverified())))) askAI();
     renderCamRead();
   }
@@ -1886,7 +1950,8 @@
       const actTxt = cam.betNote ? `${cam.betNote}${cam.betAt ? ` · ${Math.round((Date.now() - cam.betAt) / 1000)} s ago` : ''}` : 'Betting: waiting for the first reading.';
       lines.push(`<div class="cam-line"><span class="act-txt" title="${esc(actTxt + (cam.seatNote ? '\n' + cam.seatNote : ''))}">${esc(actTxt)}</span></div>`);
     } else lines.push(`<div class="cam-line"><span class="note cam-ai">${ai ? `AI check · ${cam.ai.calls} call${cam.ai.calls === 1 ? '' : 's'}` : HV && HV.api.has('vision') ? 'AI check paused' : 'On-device only'}${cam.ai.busy ? ' · checking…' : ''}</span></div>`);
-    $('camRead').innerHTML = lines.join('');
+    const html = lines.join('');
+    if (cam.readHtml !== html) { $('camRead').innerHTML = html; cam.readHtml = html; }
     renderReady();
   }
   function useCameraCards(c, src) {
@@ -1895,7 +1960,7 @@
     else { edit('set_board', { cards: c.cards }); syncLock(); cam.lock.board = c.cards.map(() => src); const t = BOARD_N.indexOf(c.cards.length); if (step > t) go(t); }
     camNote(`The camera kept seeing ${c.kind === 'hero' ? 'your cards' : 'the board'} as ${cardsTxt(c.cards)}: the table now has that.`);
   }
-  $('camReread').addEventListener('click', () => { syncLock(); cam.lock.hero = null; cam.lock.board = []; cam.hold = null; cam.asked = null; cam.localKey = ''; cam.seen = []; camNote('Reading the table again…'); renderCamRead(); });
+  $('camReread').addEventListener('click', () => { syncLock(); cam.lock.hero = null; cam.lock.board = []; cam.hold = null; cam.asked = null; cam.localKey = ''; cam.seen = []; cam.cardHistory = {}; cameraRequests.cancel(); camNote('Reading the table again…'); renderCamRead(); });
   $('camBets').checked = store.get('walkthrough.camBets') !== false; // on unless you turned it off
   $('camAiCards').checked = store.get('walkthrough.camAiCards') !== false;
   $('camAiCards').addEventListener('change', () => { store.set('walkthrough.camAiCards', $('camAiCards').checked); syncLock(); cam.hold = null; camNote($('camAiCards').checked ? 'The AI double-checks the cards again.' : 'Cards: the phone\'s own reading only. The AI still follows the betting.'); renderCamRead(); });
@@ -1928,7 +1993,8 @@
   // Which way up: turned automatically when the AI sees it sideways, or by hand with ↻. Remembered on this device.
   cam.rot = [0, 90, 180, 270].includes(store.get('walkthrough.camRot')) ? store.get('walkthrough.camRot') : 0;
   function setRot(r) {
-    cam.rot = r; store.set('walkthrough.camRot', r); cam.prevThumb = null; cam.asked = null; cam.seen = []; cam.localKey = ''; if (cam.live) { cam.live.box = null; cam.live.fullAt = 0; }
+    cameraRequests.cancel();
+    cam.rot = r; store.set('walkthrough.camRot', r); cam.prevThumb = null; cam.asked = null; cam.seen = []; cam.cardHistory = {}; cam.localKey = ''; if (cam.live) { cam.live.box = null; cam.live.fullAt = 0; }
     if (cam.crop) { setCrop(null, 'reset'); cam.wantFit = true; } // a crop belongs to one way up
     if (ed.crop) ed.crop = { ...FULL_CROP };
   }
@@ -1948,10 +2014,11 @@
   const isFull = c => !c || (c.w > 0.97 && c.h > 0.97);
   { const st = store.get('walkthrough.camCrop'); cam.crop = st && st.rot === cam.rot && !isFull(st) ? clampCrop(st) : null; cam.cropAuto = !st || !!(st && st.auto); }
   function setCrop(c, how) { // how: 'auto' (fitted to the table), 'hand', or 'reset'
+    cameraRequests.cancel();
     cam.crop = isFull(c) ? null : clampCrop(c);
     if (how !== 'reset') cam.cropAuto = how === 'auto';
     store.set('walkthrough.camCrop', cam.crop ? { ...cam.crop, rot: cam.rot, auto: cam.cropAuto } : { rot: cam.rot, auto: cam.cropAuto });
-    cam.prevThumb = null; cam.asked = null; cam.seen = []; cam.localKey = ''; cam.lostTable = 0; cam.cropVer = (cam.cropVer || 0) + 1;
+    cam.prevThumb = null; cam.asked = null; cam.seen = []; cam.cardHistory = {}; cam.localKey = ''; cam.lostTable = 0; cam.cropVer = (cam.cropVer || 0) + 1;
     if (cam.live) { cam.live.box = null; cam.live.fullAt = 0; } // the next full reading finds the table in the new picture
     cameraResolution();
   }

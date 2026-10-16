@@ -76,8 +76,9 @@ const TABLE_SCHEMA = {
 // Following live: only what changes during a hand, as short arrays (a short answer is a fast answer). Seats are in the
 // same order as the full reading: the followed player first, then clockwise.
 const LIVE_SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['rotate', 'ok', 'cards_ok', 'bets', 'folded', 'to_act', 'pot', 'board', 'hero'],
+  type: 'object', additionalProperties: false, required: ['rotate', 'unit', 'ok', 'cards_ok', 'bets', 'folded', 'to_act', 'pot', 'board', 'hero'],
   properties: {
+    unit: { type: 'string', enum: ['chips', 'big blinds'], description: 'Unit of the displayed amounts; never convert them.' },
     rotate: { type: 'integer', enum: [0, 90, 180, 270], description: 'Degrees to turn the picture clockwise to make the table upright; 0 if it is.' },
     ok: { type: 'boolean', description: 'true only if every seat\'s bet and folded state and whose turn it is are clearly readable.' },
     cards_ok: { type: 'boolean', description: 'true only if every face-up card is clearly readable.' },
@@ -140,9 +141,9 @@ function tablePrompt(player, scale) {
     `The followed player is ${player}. List every occupied seat starting with the followed player, then clockwise (on the picture: from the bottom up the left side, across the top, down the right side).`,
     'For each seat: the name as written, the stack behind (chips left, not counting the bet in front), whether the dealer button is there, whether the player folded, the chips in front of them on this street, and their latest action on this street.',
     'Card codes are rank then suit: ranks A K Q J T 9 8 7 6 5 4 3 2, suits s h d c. Some decks colour diamonds blue and clubs green.',
-    'Amounts are numbers as shown, without currency symbols. If the blinds are printed on the table (e.g. "$0.50/$1"), report them.',
+    'Copy stack, bet and pot strings exactly as printed, including decimal points and unit symbols. Report the blinds as numbers if printed (e.g. "$0.50/$1").',
     'The picture may be sideways or upside down (a phone filmed lying on its side): read it as it should be, and say in rotate how far to turn it clockwise to make it upright.',
-    'Be strict in readable: mark a part false unless you can read all of it clearly, and say why in problems. Use "" or -1 for any single value you cannot read. Never guess.',
+    'Be strict in readable: mark a part false unless you can read all of it clearly, and say why in problems. Use -1 for an unreadable amount; use an empty bet only when clearly no chips are in front. Never guess.',
     READING_GUIDE,
   ].join('\n');
 }
@@ -155,6 +156,7 @@ function livePrompt(player, seats, cards = true, scale = null) {
     `Per seat: the chips in front of it on this street, and whether it has folded. Then whose turn it is (highlighted seat, timer bar)${cards ? ', the pot as shown, and the face-up cards (codes: rank then suit, e.g. Ah, Td)' : ' and the pot as shown. Leave board and hero empty and cards_ok false: the cards are read elsewhere'}.`,
     'The picture may be sideways: read it upright and say in rotate how far to turn it clockwise.',
     ...(cards ? ['board: the face-up row in the middle by the pot (0, 3, 4 or 5 cards). hero: the two face-up cards beside the followed player\'s plate, never cards from the middle row. Card backs are nobody\'s board.'] : []),
+    'Report unit as chips or big blinds exactly as displayed. Never convert amounts. An unreadable bet is -1; an empty bet means clearly no chips in front.',
     'A bet is the chips or amount between a player and the middle, and belongs to the nearest player. The pot is the figure printed as the pot: read it, never add it up.',
     'Folded: a seat labelled "Folded" or "Fold" (in the Hand Walkthrough app the word FOLDED sits between the avatar and the name, the seat dimmed) has folded; that label decides it.',
     'Never guess: set ok or cards_ok to false if you cannot read that part clearly, or cannot tell board cards from the player\'s.',
@@ -180,14 +182,14 @@ function normalizeLive(raw) {
   const r = raw && typeof raw === 'object' ? raw : {};
   const bets = Array.isArray(r.bets) ? r.bets.slice(0, 9) : [], folded = Array.isArray(r.folded) ? r.folded : [];
   const problems = [];
-  let betting = !!r.ok && bets.length >= 2 && folded.length === bets.length && bets.every(x => parseAmount(x) !== null);
+  let betting = !!r.ok && ['chips', 'big blinds'].includes(r.unit) && bets.length >= 2 && folded.length === bets.length && folded.every(x => typeof x === 'boolean') && bets.every(x => parseAmount(x) !== null);
   if (r.ok && !betting) problems.push('the seats didn\'t add up');
-  const seats = bets.map((x, i) => ({ name: '', stack: null, dealer: false, folded: !!folded[i], bet: parseAmount(x) || 0, last: 'none' }));
+  const seats = bets.map((x, i) => ({ name: '', stack: null, dealer: false, folded: !!folded[i], bet: parseAmount(x), last: 'none' }));
   const cards = normalize({ board: r.board, hero: r.hero, unsure: [] });
   const cardsOk = !!r.cards_ok && !cards.unsure.length;
   return {
     live: true, rotate: [90, 180, 270].includes(r.rotate) ? r.rotate : 0, pot: parseAmount(r.pot) || null,
-    readable: { cards: cardsOk, seats: false, names: false, stacks: false, betting }, problems, unit: 'chips', blinds: null, seats,
+    readable: { cards: cardsOk, seats: false, names: false, stacks: false, betting }, problems, unit: r.unit === 'big blinds' ? 'bb' : 'chips', blinds: null, seats,
     toAct: Number.isInteger(r.to_act) && r.to_act >= 0 && r.to_act < seats.length ? r.to_act : null,
     board: cardsOk ? cards.board : null, hero: cardsOk ? cards.hero : null,
   };
@@ -201,11 +203,12 @@ function normalizeTable(raw) {
   const seats = (Array.isArray(r.seats) ? r.seats : []).slice(0, 9).map(x => ({
     name: typeof x.name === 'string' ? x.name.trim().slice(0, 24) : '',
     stack: x.stack === '' ? null : parseAmount(x.stack),
-    dealer: !!x.dealer, folded: !!x.folded, bet: parseAmount(x.in_front) || 0,
+    dealer: !!x.dealer, folded: !!x.folded, bet: parseAmount(x.in_front),
     last: typeof x.last_action === 'string' ? x.last_action : 'none',
   }));
   if (seats.length < 2 || seats.filter(x => x.dealer).length !== 1) { if (readable.seats) problems.push(seats.length < 2 ? 'fewer than two seats seen' : 'the dealer button wasn\'t clear'); readable.seats = false; }
-  if (!readable.seats) readable.betting = false;
+  if (!['chips', 'big blinds'].includes(r.unit)) { readable.betting = false; readable.stacks = false; }
+  if (!readable.seats || seats.some(x => x.bet === null)) readable.betting = false;
   if (seats.some(x => !x.name)) readable.names = false;
   if (seats.some(x => x.stack === null)) readable.stacks = false;
   const cards = normalize({ board: r.board, hero: r.hero, unsure: [] });

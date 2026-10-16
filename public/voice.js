@@ -19,17 +19,17 @@
     },
     has(feature) { return !!(this.status && this.status.features && this.status.features[feature]); },
 
-    async request(path, { method = 'POST', body, headers = {}, as = 'json', retried = false } = {}) {
+    async request(path, { method = 'POST', body, headers = {}, as = 'json', signal, retried = false } = {}) {
       const code = store.get(CODE_KEY);
       let res;
-      try { res = await fetch(path, { method, body, headers: { ...headers, ...(code ? { 'X-Access-Code': code } : {}) } }); }
-      catch (e) { throw new ApiError(0, 'offline', 'Could not reach the server. Check your connection.'); }
+      try { res = await fetch(path, { method, body, signal, headers: { ...headers, ...(code ? { 'X-Access-Code': code } : {}) } }); }
+      catch (e) { if (e.name === 'AbortError') throw e; throw new ApiError(0, 'offline', 'Could not reach the server. Check your connection.'); }
       if (res.ok) return as === 'blob' ? res.blob() : res.json();
       let err = { code: 'http_' + res.status, message: `Server error ${res.status}` };
       try { err = (await res.json()).error || err; } catch (e) {}
       if (err.code === 'access_code_required' && !retried) {
         const entered = window.prompt(code ? 'That access code did not work. Enter the access code:' : 'Enter the access code for voice features:');
-        if (entered) { store.set(CODE_KEY, entered.trim()); return this.request(path, { method, body, headers, as, retried: true }); }
+        if (entered) { store.set(CODE_KEY, entered.trim()); return this.request(path, { method, body, headers, as, signal, retried: true }); }
         store.set(CODE_KEY, null);
       }
       throw new ApiError(res.status, err.code, err.message);
@@ -39,7 +39,7 @@
       const code = store.get(CODE_KEY);
       let res;
       try { res = await fetch(path, { method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson', ...(code ? { 'X-Access-Code': code } : {}) } }); }
-      catch (e) { throw new ApiError(0, 'offline', 'Could not reach the server. Check your connection.'); }
+      catch (e) { if (e.name === 'AbortError') throw e; throw new ApiError(0, 'offline', 'Could not reach the server. Check your connection.'); }
       if (!res.ok) {
         let err = { code: 'http_' + res.status, message: `Server error ${res.status}` };
         try { err = (await res.json()).error || err; } catch (e) {}

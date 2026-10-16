@@ -68,7 +68,8 @@
     let sab = 0, saa = 0, sbb = 0; for (let i = 0; i < a.length; i++) { const x = a[i] - ma, y = b[i] - mb; sab += x * y; saa += x * x; sbb += y * y; }
     return saa && sbb ? sab / Math.sqrt(saa * sbb) : 0;
   }
-  async function init() {
+  async function init(supplied) {
+    if (supplied) { templates = supplied; return templates; }
     if (templates) return templates;
     try { if (document.fonts) await Promise.race([document.fonts.load('600 64px "IBM Plex Mono"'), new Promise(r => setTimeout(r, 2500))]); } catch (e) { /* fall back to system fonts */ }
     // drawn small and at several blurs, like a glyph seen through a camera
@@ -290,7 +291,7 @@
     const R = match(T.rank, resample(ink, FW, FH, rk), (rk.x1 - rk.x0 + 1) / rh);
     const Su = color === 'blue' ? { label: 'd', score: 1, margin: 1 } : color === 'green' ? { label: 'c', score: 1, margin: 1 }
       : match(T.suit, resample(ink, FW, FH, square(su, FH), SG, SG), 1, isRed ? ['h', 'd'] : ['s', 'c'], topProfile(ink, FW, FH, square(su, FH)), R.blur);
-    const ok = R.score > 0.75 && R.margin > 0.035 && Su.score > 0.6;
+    const ok = R.score > 0.75 && R.margin > 0.035 && Su.score > 0.6 && Su.margin > 0.035;
     return { code: R.label + Su.label, rank: R.label, suit: Su.label, ok, conf: Math.min(R.score, Su.score), rankScore: R.score, rankMargin: R.margin, suitScore: Su.score, suitMargin: Su.margin, color };
   }
 
@@ -332,7 +333,10 @@
     const codes = list => list.map(c => c.code);
     const used = [...(lay.hero || []), ...lay.board];
     const unique = new Set(codes(used)).size === used.length;
-    return { cards, hero: lay.hero ? codes(lay.hero) : null, board: codes(lay.board), complete: used.length > 0 && unique && used.every(c => c.ok), fourColor: four, width: w, height: h };
+    return { cards, hero: lay.hero ? codes(lay.hero) : null, board: codes(lay.board),
+      heroComplete: unique && !!lay.hero && lay.hero.every(c => c.ok),
+      boardComplete: unique && (lay.board.length > 0 ? lay.board.every(c => c.ok) : !!lay.hero && faces.length === lay.hero.length),
+      complete: used.length > 0 && unique && used.every(c => c.ok), fourColor: four, width: w, height: h };
   }
 
   root.CardVision = { init, analyze, SUIT_SYM, _debug: { P, findFaces, readFace, layout, templates: () => templates } };

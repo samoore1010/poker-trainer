@@ -234,11 +234,11 @@ test('vision: whole-table reading is strict about what it could read', () => {
 
 test('vision: the short live reading becomes the same seats shape, and is strict', () => {
   const { normalizeLive } = require('../server/vision');
-  const r = normalizeLive({ rotate: 0, ok: true, cards_ok: true, bets: [2, 5, 0, 5], folded: [false, false, true, false], to_act: 0, pot: 13, board: [], hero: ['As', 'Kd'] });
+  const r = normalizeLive({ unit: 'chips', rotate: 0, ok: true, cards_ok: true, bets: [2, 5, 0, 5], folded: [false, false, true, false], to_act: 0, pot: 13, board: [], hero: ['As', 'Kd'] });
   assert.equal(r.live, true); assert.equal(r.seats.length, 4); assert.equal(r.seats[1].bet, 5); assert.equal(r.seats[2].folded, true);
   assert.equal(r.toAct, 0); assert.equal(r.pot, 13); assert.deepEqual(r.hero, ['As', 'Kd']); assert.equal(r.readable.betting, true);
-  assert.equal(normalizeLive({ ok: true, cards_ok: true, bets: [2, 5], folded: [false], to_act: 0, pot: 0, board: [], hero: [] }).readable.betting, false); // lengths differ
-  assert.equal(normalizeLive({ ok: false, cards_ok: false, bets: [2, 5], folded: [false, false], to_act: 9, pot: 0, board: ['Ah'], hero: [] }).toAct, null);
+  assert.equal(normalizeLive({ unit: 'chips', ok: true, cards_ok: true, bets: [2, 5], folded: [false], to_act: 0, pot: 0, board: [], hero: [] }).readable.betting, false); // lengths differ
+  assert.equal(normalizeLive({ unit: 'chips', ok: false, cards_ok: false, bets: [2, 5], folded: [false, false], to_act: 9, pot: 0, board: ['Ah'], hero: [] }).toAct, null);
 });
 
 test('vision: replies parse even when wrapped, and live reads leave room for the answer', async () => {
@@ -271,10 +271,32 @@ test('vision: amounts are read as printed, decimal point kept', () => {
   assert.equal(parseAmount('$0.53'), 0.53); assert.equal(parseAmount('1,250'), 1250); assert.equal(parseAmount('€1,50'), 1.5);
   assert.equal(parseAmount('2.5 BB'), 2.5); assert.equal(parseAmount('1.2k'), 1200); assert.equal(parseAmount(''), 0); assert.equal(parseAmount(7), 7);
   assert.equal(parseAmount('all in'), null); assert.equal(parseAmount(-3), null);
-  const L = normalizeLive({ ok: true, cards_ok: false, bets: ['$0.10', '', '$0.53'], folded: [false, false, false], to_act: 1, pot: '$0.78', board: [], hero: [] });
+  const L = normalizeLive({ unit: 'chips', ok: true, cards_ok: false, bets: ['$0.10', '', '$0.53'], folded: [false, false, false], to_act: 1, pot: '$0.78', board: [], hero: [] });
   assert.deepEqual(L.seats.map(x => x.bet), [0.1, 0, 0.53]); assert.equal(L.pot, 0.78); assert.equal(L.readable.betting, true);
-  assert.equal(normalizeLive({ ok: true, cards_ok: false, bets: ['$0.10', 'blurry'], folded: [false, false], to_act: 0, pot: '', board: [], hero: [] }).readable.betting, false);
+  assert.equal(normalizeLive({ unit: 'chips', ok: true, cards_ok: false, bets: ['$0.10', 'blurry'], folded: [false, false], to_act: 0, pot: '', board: [], hero: [] }).readable.betting, false);
   const seat = (o = {}) => ({ name: 'A', stack: '$10.65', dealer: false, folded: false, in_front: '$0.05', last_action: 'none', ...o });
   const T = normalizeTable({ readable: { cards: false, seats: true, names: true, stacks: true, betting: true }, problems: [], unit: 'chips', small_blind: 0.05, big_blind: 0.1, pot: '$0.15', seats: [seat(), seat({ name: 'B', dealer: true, in_front: '$0.10', stack: '' })], to_act: 0, board: [], hero: [] });
   assert.deepEqual(T.seats.map(x => [x.stack, x.bet]), [[10.65, 0.05], [null, 0.1]]); assert.equal(T.pot, 0.15); assert.equal(T.readable.stacks, false);
+});
+
+test('vision: unreadable bets stay unknown and cannot drive betting updates', () => {
+  const { normalizeTable, normalizeLive } = require('../server/vision');
+  const raw = { unit: 'chips', readable: { seats: true, betting: true }, seats: [
+    { dealer: true, in_front: 'blurry' }, { dealer: false, in_front: '' },
+  ] };
+  const t = normalizeTable(raw);
+  assert.equal(t.readable.betting, false);
+  assert.deepEqual(t.seats.map(s => s.bet), [null, 0]);
+  const l = normalizeLive({ unit: 'chips', ok: true, bets: ['-1', '0'], folded: [false, false] });
+  assert.equal(l.readable.betting, false);
+  assert.equal(l.seats[0].bet, null);
+});
+test('vision: live big-blind amounts retain their unit; unknown units are rejected', () => {
+  const { normalizeLive } = require('../server/vision');
+  const raw = { unit: 'big blinds', ok: true, bets: ['2.5 BB', '1 BB'], folded: [false, false], pot: '3.5 BB' };
+  const t = normalizeLive(raw);
+  assert.equal(t.unit, 'bb'); assert.equal(t.readable.betting, true);
+  assert.deepEqual(t.seats.map(s => s.bet), [2.5, 1]);
+  assert.equal(normalizeLive({ ...raw, unit: 'unknown' }).readable.betting, false);
+  assert.equal(normalizeLive({ ...raw, unit: undefined }).readable.betting, false);
 });
