@@ -50,9 +50,28 @@ const SEAT = {
     last_action: { type: 'string', enum: ['none', 'post', 'check', 'call', 'bet', 'raise', 'all-in', 'fold'], description: 'Its latest action on this street; post = only its blind so far; none = not acted on this street yet.' },
   },
 };
-const TABLE_SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['rotate', 'readable', 'problems', 'unit', 'small_blind', 'big_blind', 'pot', 'seats', 'to_act', 'board', 'hero'],
+const CONTROLS = {
+  type: 'object', additionalProperties: false, required: ['visible', 'enabled', 'action', 'call_amount', 'unit', 'hero_timer'],
   properties: {
+    visible: { type: 'boolean', description: 'The followed player action controls are visible, including controls below the table.' },
+    enabled: { type: 'boolean', description: 'These are active action buttons NOW, not disabled buttons or advance-action checkboxes. If uncertain, false.' },
+    action: { type: 'string', enum: ['call', 'check', 'unknown'] },
+    call_amount: { type: 'string', description: 'Exact amount printed on Call, or 0 for Check; empty if unreadable. This is additional chips owed, not raise-to size.' },
+    unit: { type: 'string', enum: ['chips', 'big blinds', 'unknown'] },
+    hero_timer: { type: 'boolean', description: 'An active decision timer is attached to the followed player. Time-bank buttons and the phone clock are not countdowns.' },
+  },
+};
+function normalizeControls(c) {
+  if (!c || typeof c !== 'object') return null;
+  const toCall = c.action === 'check' ? 0 : c.call_amount === '' ? null : parseAmount(c.call_amount);
+  const active = c.visible === true && c.enabled === true && ['call', 'check'].includes(c.action) && toCall !== null;
+  return { active, enabled: c.enabled === true, action: c.action, toCall, timer: c.hero_timer === true,
+    unit: c.unit === 'big blinds' ? 'bb' : c.unit === 'chips' ? 'chips' : null, confidence: active ? 0.9 : 0 };
+}
+const TABLE_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['controls', 'rotate', 'readable', 'problems', 'unit', 'small_blind', 'big_blind', 'pot', 'seats', 'to_act', 'board', 'hero'],
+  properties: {
+    controls: CONTROLS,
     readable: { type: 'object', additionalProperties: false, required: ['cards', 'seats', 'names', 'stacks', 'betting'], description: 'true only for what you can read with confidence.', properties: {
       cards: { type: 'boolean', description: 'Every face-up card (board and the followed player).' },
       seats: { type: 'boolean', description: 'How many players are seated, in order, and where the dealer button is.' },
@@ -76,8 +95,9 @@ const TABLE_SCHEMA = {
 // Following live: only what changes during a hand, as short arrays (a short answer is a fast answer). Seats are in the
 // same order as the full reading: the followed player first, then clockwise.
 const LIVE_SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['rotate', 'unit', 'ok', 'cards_ok', 'bets', 'folded', 'to_act', 'pot', 'board', 'hero'],
+  type: 'object', additionalProperties: false, required: ['controls', 'rotate', 'unit', 'ok', 'cards_ok', 'bets', 'folded', 'to_act', 'pot', 'board', 'hero'],
   properties: {
+    controls: CONTROLS,
     unit: { type: 'string', enum: ['chips', 'big blinds'], description: 'Unit of the displayed amounts; never convert them.' },
     rotate: { type: 'integer', enum: [0, 90, 180, 270], description: 'Degrees to turn the picture clockwise to make the table upright; 0 if it is.' },
     ok: { type: 'boolean', description: 'true only if every seat\'s bet and folded state and whose turn it is are clearly readable.' },
@@ -144,6 +164,7 @@ function tablePrompt(player, scale) {
     'Copy stack, bet and pot strings exactly as printed, including decimal points and unit symbols. Report the blinds as numbers if printed (e.g. "$0.50/$1").',
     'The picture may be sideways or upside down (a phone filmed lying on its side): read it as it should be, and say in rotate how far to turn it clockwise to make it upright.',
     'Be strict in readable: mark a part false unless you can read all of it clearly, and say why in problems. Use -1 for an unreadable amount; use an empty bet only when clearly no chips are in front. Never guess.',
+    'Read the followed player action controls even when below the felt. Call N is the additional price to call; cross-check it against contributions. Active controls plus the hero timer indicate whose turn it is. Never treat advance-action buttons as an active turn.',
     READING_GUIDE,
   ].join('\n');
 }
@@ -156,6 +177,7 @@ function livePrompt(player, seats, cards = true, scale = null) {
     `Per seat: the chips in front of it on this street, and whether it has folded. Then whose turn it is (highlighted seat, timer bar)${cards ? ', the pot as shown, and the face-up cards (codes: rank then suit, e.g. Ah, Td)' : ' and the pot as shown. Leave board and hero empty and cards_ok false: the cards are read elsewhere'}.`,
     'The picture may be sideways: read it upright and say in rotate how far to turn it clockwise.',
     ...(cards ? ['board: the face-up row in the middle by the pot (0, 3, 4 or 5 cards). hero: the two face-up cards beside the followed player\'s plate, never cards from the middle row. Card backs are nobody\'s board.'] : []),
+    'Prioritize the followed player action controls, including Fold / Call N / Raise below the table. Extract the exact additional call price. Disabled controls and pre-action choices do not establish a turn. Cross-check the hero timer and chip amounts; ignore level badges, time-bank buttons and phone status text.',
     'Report unit as chips or big blinds exactly as displayed. Never convert amounts. An unreadable bet is -1; an empty bet means clearly no chips in front.',
     'A bet is the chips or amount between a player and the middle, and belongs to the nearest player. The pot is the figure printed as the pot: read it, never add it up.',
     'Folded: a seat labelled "Folded" or "Fold" (in the Hand Walkthrough app the word FOLDED sits between the avatar and the name, the seat dimmed) has folded; that label decides it.',
@@ -188,7 +210,7 @@ function normalizeLive(raw) {
   const cards = normalize({ board: r.board, hero: r.hero, unsure: [] });
   const cardsOk = !!r.cards_ok && !cards.unsure.length;
   return {
-    live: true, rotate: [90, 180, 270].includes(r.rotate) ? r.rotate : 0, pot: parseAmount(r.pot) || null,
+    controls: normalizeControls(r.controls), live: true, rotate: [90, 180, 270].includes(r.rotate) ? r.rotate : 0, pot: parseAmount(r.pot) || null,
     readable: { cards: cardsOk, seats: false, names: false, stacks: false, betting }, problems, unit: r.unit === 'big blinds' ? 'bb' : 'chips', blinds: null, seats,
     toAct: Number.isInteger(r.to_act) && r.to_act >= 0 && r.to_act < seats.length ? r.to_act : null,
     board: cardsOk ? cards.board : null, hero: cardsOk ? cards.hero : null,
@@ -215,7 +237,7 @@ function normalizeTable(raw) {
   if (cards.unsure.length) { readable.cards = false; problems.push(...cards.unsure); }
   const sb = +r.small_blind, bb = +r.big_blind;
   return {
-    rotate: [90, 180, 270].includes(r.rotate) ? r.rotate : 0, pot: parseAmount(r.pot) || null,
+    controls: normalizeControls(r.controls), rotate: [90, 180, 270].includes(r.rotate) ? r.rotate : 0, pot: parseAmount(r.pot) || null,
     readable, problems, unit: r.unit === 'big blinds' ? 'bb' : 'chips', blinds: bb > 0 && sb > 0 && sb <= bb ? { small: sb, big: bb } : null, seats,
     toAct: Number.isInteger(r.to_act) && r.to_act >= 0 && r.to_act < seats.length ? r.to_act : null,
     board: readable.cards ? cards.board : null, hero: readable.cards ? cards.hero : null,
@@ -280,11 +302,11 @@ function createVision(config, openai) {
       read({ data, mime, player, betting }) {
         return ask({ data, mime, model, system: prompt(player || DEFAULT_PLAYER, betting), schema: betting ? BETTING_SCHEMA : SCHEMA, text: 'Read the board and the player\'s cards.', effort: 'low' });
       },
-      readTable({ data, mime, player, fast, scale }) {
-        return ask({ data, mime, model: fast ? liveModel : syncModel, system: tablePrompt(player || TABLE_PLAYER, scale), schema: TABLE_SCHEMA, text: 'Read the whole table, seat by seat.', effort: fast ? 'low' : 'medium', quick: fast });
+      readTable({ data, mime, player, fast, scale, decision }) {
+        return ask({ data, mime, model: fast ? liveModel : syncModel, system: tablePrompt(player || TABLE_PLAYER, scale) + (decision ? '\nURGENT DECISION: prioritize active controls, additional call price, hero cards, board, current contributions and pot. Mark uncertain fields unreadable; do not guess history or names.' : ''), schema: TABLE_SCHEMA, text: 'Read the whole table, seat by seat.', effort: fast ? 'low' : 'medium', quick: fast });
       },
-      readLive({ data, mime, player, seats, cards, scale }) {
-        return ask({ data, mime, model: liveModel, system: livePrompt(player || TABLE_PLAYER, seats, cards, scale), schema: LIVE_SCHEMA, text: 'Bets, folds, whose turn, pot, cards.', effort: 'low', quick: true });
+      readLive({ data, mime, player, seats, cards, scale, decision }) {
+        return ask({ data, mime, model: liveModel, system: livePrompt(player || TABLE_PLAYER, seats, cards, scale) + (decision ? '\nURGENT DECISION: prioritize active controls and the call price; validate them against contributions. Unknown fields must remain unknown.' : ''), schema: LIVE_SCHEMA, text: 'Bets, folds, whose turn, pot, cards.', effort: 'low', quick: true });
       },
     };
     // Thinking counts against max_tokens: a tight cap ends the answer before the JSON is written. Live reads turn
@@ -325,8 +347,8 @@ function createVision(config, openai) {
     return {
       name: 'openai', model, syncModel, liveModel,
       read({ data, mime, player, betting }) { return ask({ data, mime, model, system: prompt(player || DEFAULT_PLAYER, betting), schema: betting ? BETTING_SCHEMA : SCHEMA, name: 'cards', text: 'Read the board and the player\'s cards.' }); },
-      readTable({ data, mime, player, fast, scale }) { return ask({ data, mime, model: fast ? liveModel : syncModel, system: tablePrompt(player || TABLE_PLAYER, scale), schema: TABLE_SCHEMA, name: 'table', text: 'Read the whole table, seat by seat.' }); },
-      readLive({ data, mime, player, seats, cards, scale }) { return ask({ data, mime, model: liveModel, system: livePrompt(player || TABLE_PLAYER, seats, cards, scale), schema: LIVE_SCHEMA, name: 'live', text: 'Bets, folds, whose turn, pot, cards.' }); },
+      readTable({ data, mime, player, fast, scale, decision }) { return ask({ data, mime, model: fast ? liveModel : syncModel, system: tablePrompt(player || TABLE_PLAYER, scale) + (decision ? '\nURGENT DECISION: prioritize active controls, additional call price, hero cards, board, current contributions and pot. Mark uncertain fields unreadable; do not guess history or names.' : ''), schema: TABLE_SCHEMA, name: 'table', text: 'Read the whole table, seat by seat.' }); },
+      readLive({ data, mime, player, seats, cards, scale, decision }) { return ask({ data, mime, model: liveModel, system: livePrompt(player || TABLE_PLAYER, seats, cards, scale) + (decision ? '\nURGENT DECISION: prioritize active controls and the call price; validate them against contributions. Unknown fields must remain unknown.' : ''), schema: LIVE_SCHEMA, name: 'live', text: 'Bets, folds, whose turn, pot, cards.' }); },
     };
     async function ask({ data, mime, model, system, schema, name, text: say }) {
       const res = await openai.responses({
@@ -347,4 +369,4 @@ function createVision(config, openai) {
   return null;
 }
 
-module.exports = { createVision, parseJson, parseAmount, normalize, normalizeTable, normalizeLive, CODES, SCHEMA, BETTING_SCHEMA, TABLE_SCHEMA, LIVE_SCHEMA, POSITIONS };
+module.exports = { normalizeControls, createVision, parseJson, parseAmount, normalize, normalizeTable, normalizeLive, CODES, SCHEMA, BETTING_SCHEMA, TABLE_SCHEMA, LIVE_SCHEMA, POSITIONS };

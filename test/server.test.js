@@ -300,3 +300,12 @@ test('vision: live big-blind amounts retain their unit; unknown units are reject
   assert.equal(normalizeLive({ ...raw, unit: 'unknown' }).readable.betting, false);
   assert.equal(normalizeLive({ ...raw, unit: undefined }).readable.betting, false);
 });
+test('vision: action controls preserve the additional call price and reject unreadable or disabled controls', () => {
+  const { normalizeControls, LIVE_SCHEMA, TABLE_SCHEMA } = require('../server/vision');
+  const c={visible:true,enabled:true,action:'call',call_amount:'3',unit:'chips',hero_timer:true};
+  assert.equal(normalizeControls(c).toCall,3);assert.equal(normalizeControls(c).active,true);
+  assert.equal(normalizeControls({...c,enabled:false}).active,false);
+  assert.equal(normalizeControls({...c,call_amount:''}).active,false);
+  assert.equal(normalizeControls({...c,action:'check',call_amount:'0'}).toCall,0);
+  assert.ok(LIVE_SCHEMA.required.includes('controls'));assert.ok(TABLE_SCHEMA.required.includes('controls'));
+});

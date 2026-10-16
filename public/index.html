@@ -543,12 +543,15 @@
           <div class="cam-off" id="camOff">
             <button type="button" class="cam-start" id="camBtn" title="Point your camera at a table: the cards it sees go on this one">📷 Start camera</button>
             <p class="note">Point a phone or laptop camera at the table: your cards, the board and (with the AI) the betting fill in by themselves.</p>
+            <div class="cam-btnrow"><button type="button" id="shareScreen">Share screen</button><label>Replay video <input type="file" id="replayVideo" accept="video/*"></label></div>
             <p class="dock-info" id="dockInfo"></p>
           </div>
           <div class="cam-on" id="camOn" hidden>
             <video id="camVideo" class="cam-src" playsinline muted autoplay></video>
             <div class="cam-head"><span class="cam-live"><i class="cam-dot" id="camDot"></i>Live</span><label title="Put the cards the camera reads on this table"><input type="checkbox" id="camAuto" checked> Update the table</label><label class="cam-opt" id="camAiCardsRow" hidden title="The AI double-checks the cards the phone reads. Off: the cards come from the phone's own reading alone (faster, fewer AI calls); the AI still follows the betting."><input type="checkbox" id="camAiCards"> AI checks the cards</label><label class="cam-opt" id="camBetsRow" hidden title="The AI reads the whole table about every second: who bet what, who folded, whose turn it is, the pot, names and stacks. The table follows it as it happens."><input type="checkbox" id="camBets"> Follow the table live</label></div>
             <div class="cam-ready" id="camReady"></div>
+            <div id="decisionNow" role="status" aria-live="polite" hidden></div>
+            <div class="cam-head"><label>Screen layout <select id="sourceProfile"><option value="generic">Other / automatic AI</option><option value="pure">Pure portrait (5 seats)</option></select></label><button type="button" id="frameScreen">Frame source screen</button><button type="button" id="clearScreen">Reset frame</button><button type="button" id="toggleReplay" hidden>Pause replay</button><input id="replaySeek" type="range" min="0" max="1" step="0.1" hidden aria-label="Replay position"></div>
             <div class="cam-body" id="camBody">
               <div class="cam-view" id="camView" title="Tap to crop and zoom"><canvas id="camPrev"></canvas><button type="button" class="cam-rot" id="camRot" title="Turn the picture a quarter turn (it also turns itself upright when the AI sees it sideways)" aria-label="Turn the picture">↻</button></div>
               <div class="cam-info"><div class="cam-read" id="camRead"></div><div class="cam-slot"><p class="note" id="camNote">Starting the camera…</p></div></div>
@@ -584,6 +587,7 @@
   <div class="crop-bar"><p class="note" id="cropNote">Frame the table: drag the box to move it, drag a corner to resize, pinch (or scroll) to zoom. Only the framed part is read.</p><button type="button" class="ghost" id="cropFit" title="Crop to the table the AI found">Fit to table</button><button type="button" class="ghost" id="cropAll">Show all</button><button type="button" class="cam-rot" id="camFullRot" aria-label="Turn the picture">↻</button><button type="button" class="primary" id="cropDone">Done</button></div></div>
 <div class="cardpick" id="cardpick" hidden role="dialog" aria-label="Choose a card"></div>
 <div class="cardpick seatpop" id="seatpop" hidden role="dialog" aria-label="Edit player"></div>
+<dialog id="screenCalibration"><p>Click the source screen corners: top left, top right, bottom right, bottom left.</p><canvas id="screenCorners" style="max-width:90vw;max-height:70vh"></canvas><button type="button" id="cancelCorners">Cancel</button></dialog>
 <script src="engine.js"></script>
 <script src="setup-parser.js"></script>
 <script src="strategy.js"></script>
@@ -593,6 +597,10 @@
 <script src="voice.js"></script>
 <script src="vision.js"></script>
 <script src="camera-pipeline.js"></script>
+<script src="decision-state.js"></script>
+<script src="structured-source.js"></script>
+<script src="interface-vision.js"></script>
+<script src="advice-client.js"></script>
 <script>
 (function () {
   'use strict';
@@ -675,7 +683,8 @@
   function loadScenario(sc, opts = {}) {
     const { scenario: clean } = SC.normalize(sc);
     scenario = clean; hand = materialize(scenario, opts.prev === undefined ? hand : opts.prev);
-    step = scenario.street; cache = {}; gen++; guessed = {}; counted = {};
+    step = scenario.street; cache = {}; gen++;
+    if (typeof adviceClient !== 'undefined') adviceClient.cancel(); guessed = {}; counted = {};
     if (readSeat !== null && readSeat > scenario.opponents.length) closeRead();
     else if (readSeat !== null) $('rangeTab').firstChild.textContent = `${scenario.opponents[readSeat - 1].name}'s range`;
     $('nOpp').value = String(scenario.opponents.length);
@@ -695,7 +704,7 @@
   // goes to the winner(s), stacks carry over, the button moves on, and your new cards stay face down until they're read.
   let lastResult = store.get('walkthrough.lastResult');
   function nextHand() {
-    cameraRequests.cancel();
+    cameraRequests.cancel(); decisions.reset();
     pendingFlop = [null, null, null]; pendingHero = [null, null]; autoRun++; pushUndo(); lastReply = null;
     recordStats(); // what each player did this hand, before the rest is played out by the computer
     const res = SC.settleHand(scenario, { hero: hand.hero, opps: hand.opps, board: hand.board });
@@ -717,7 +726,7 @@
   }
   const statsOf = o => statsBook[o.name.toLowerCase()] || null;
   function resetTable() {
-    cameraRequests.cancel();
+    cameraRequests.cancel(); decisions.reset();
     pendingFlop = [null, null, null]; pendingHero = [null, null]; autoRun++; pushUndo(); lastReply = null; lastResult = null; store.set('walkthrough.lastResult', null);
     const n = scenario.opponents.length, bb = scenario.bigBlind;
     loadScenario(SC.create({ opponents: n, bigBlind: bb, smallBlind: scenario.smallBlind, stack: 100 * bb }), { prev: null });
@@ -1014,11 +1023,13 @@
     bar.hidden = false;
     bar.classList.toggle('you', you);
   }
-  function heroRec() {
+  const adviceClient = new AdviceClient(() => { scheduleRender(); renderDecision(); });
+  function currentRecommendation() {
     if (scenario.heroHidden) return null;
-    const S = sim(step); if (!S) return null;
-    try { return SC.recommendation(scenario, step, hand.hero, board(), S); } catch (e) { return null; }
+    const result = adviceClient.request({ scenario: SC.clone(scenario), street: step, hero: hand.hero, board: board() });
+    return cam.stream && !decisionValidation().ready ? null : result;
   }
+  function heroRec() { return currentRecommendation(); }
   function act(action, amount, auto) {
     const res = SC.apply(scenario, 'act', { action, amount, auto: !!auto }); // auto: the computer played it (not counted in player stats)
     if (!res.ok) { console.warn(res.error); return false; }
@@ -1306,7 +1317,11 @@
     prevThumb: null, thumbNow: null, asked: null, still: 0, needCheck: false, ai: { busy: false, last: 0, calls: 0, fails: 0, offUntil: 0 },
     hold: null, betNote: '', betAt: 0, sync: null, synced: false, syncBusy: false, quality: null, qAt: 0, flash: null };
   cam.session = 0;
-  const cameraContext = () => `${cam.session}:${cam.cropVer || 0}:${cam.rot || 0}:${scenario.deal}:${!!cam.stream}`;
+  const decisions = new DecisionState.Tracker();
+  let interfaceWorker = null, interfaceBusy = false, interfaceSeq = 0;
+  let urgentBusy = false, urgentLast = 0, urgentToken = 0;
+  cam.profile = 'generic'; cam.corners = null;
+  const cameraContext = () => `${cam.session}:${cam.cropVer || 0}:${cam.rot || 0}:${scenario.deal}:${!!cam.stream}:${cam.sourceVersion || 0}`;
   const cameraRequests = new CameraPipeline.Requests(cameraContext);
   const cameraRequest = (path, options) => cameraRequests.run(async signal => {
     const prepared = typeof options === 'function' ? await options() : options;
@@ -1515,6 +1530,7 @@
   const aiCards = () => aiReady() && $('camAiCards').checked; // the AI double-checks the cards (else the phone's reading stands alone)
   const FULL_EVERY = 10000; // the full reading (players, names, stacks, dealer): the table setup follows the camera
   function pumpLive(changed) {
+    if (urgentBusy) return;
     const L = cam.live, now = Date.now();
     if (cam.still < 1 || L.inflight || cam.syncBusy) return;
     const fresh = scenario.streets.every(st => st.actions.every(a => a.filled || a.auto));
@@ -1525,10 +1541,10 @@
   }
   // the picture for a reading: short reads are cropped to the table (learned from the last full read) and scaled down
   function liveImage(kind) {
-    const src = cam.canvas, box = kind === 'short' && cam.live.box;
+    const src = cam.sourceCv || cam.fullCv || cam.canvas, box = null;
     let sx = 0, sy = 0, sw = src.width, sh = src.height;
     if (box) { const m = 0.04; sx = Math.max(0, (box[0] - m) * src.width); sy = Math.max(0, (box[1] - m) * src.height); sw = Math.min(src.width, (box[2] + m) * src.width) - sx; sh = Math.min(src.height, (box[3] + m) * src.height) - sy; }
-    const max = kind === 'short' ? 960 : 1280, k = Math.min(1, max / Math.max(sw, sh));
+    const max = 1600, k = Math.min(1, max / Math.max(sw, sh));
     const c = cam.liveCanvas || (cam.liveCanvas = document.createElement('canvas'));
     c.width = Math.round(sw * k); c.height = Math.round(sh * k);
     c.getContext('2d').drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
@@ -1549,10 +1565,12 @@
       const ms = Date.now() - t0;
       if (kind === 'short') L.ms = L.ms ? L.ms * 0.7 + ms * 0.3 : ms; else L.fullMs = L.fullMs ? L.fullMs * 0.7 + ms * 0.3 : ms;
       if (!cam.stream || L !== cam.live || seq < L.applied) return;
-      if (kind === 'full') { L.fullAt = Date.now(); L.fullHand = hand.deal; if (T.readable.seats) { cam.seenPlayers = T.seats.length; followSeats(plausible(T), L.inSync); } L.seatMiss = 0; if (ver === (cam.cropVer || 0)) { if (T.box) L.box = T.box; noteTableBox(T); } } // (a box found in the picture before a new crop is stale)
+      if (kind === 'full') { L.fullAt = Date.now(); L.fullHand = hand.deal; if (T.readable.seats) { cam.seenPlayers = T.seats.length; if ($('camAuto').checked) followSeats(plausible(T), L.inSync); } L.seatMiss = 0; if (ver === (cam.cropVer || 0)) { if (T.box) L.box = T.box; noteTableBox(T); } } // (a box found in the picture before a new crop is stale)
       if (seq < L.applied) return; // a newer reading has already been applied: its betting and cards are fresher
       L.applied = seq; L.at = Date.now(); L.reads++;
+      observeDecisionTable(T, t0);
       applyLive(T, t0);
+      renderDecision();
     } catch (e) { aiFailed(e); } finally { L.inflight--; if (kind === 'full') L.fullBusy = false; renderCamRead(); }
   }
   // ----- amounts that can't be right -----
@@ -1622,6 +1640,7 @@
     }
   }
   function applyLive(T, capturedAt) {
+    if (!$('camAuto').checked) return;
     noteRotation(T.rotate);
     const street = aiCards() && T.readable.cards && T.board ? BOARD_N.indexOf(T.board.length) : Math.max(0, BOARD_N.indexOf(scenario.board.length));
     // the readings before this one count too (bets confirmed by two in a row, swept chips remembered, folds by majority);
@@ -1747,6 +1766,7 @@
     cam.syncBusy = true; $('camSync').disabled = true; camNote('Reading the whole table…');
     try {
       const T = await cameraRequest('/api/cards/table', async () => ({ body: JSON.stringify({ image: await frameJpeg(0.9), scale: tableScale() }), headers: { 'Content-Type': 'application/json' } }));
+      observeDecisionTable(T, Date.now());
       cam.ai.calls++; cam.sync = T; if (T.box && cam.live) cam.live.box = T.box; // for Fit to table
       if (T.readable.seats) cam.seenPlayers = T.seats.length;
       if (!T.readable.seats) { cam.synced = false; camNote(`The camera couldn't read the seats clearly${T.problems.length ? ` (${T.problems.join('; ')})` : ''}: nothing changed.`, true); return; }
@@ -1831,16 +1851,185 @@
     });
   }
 
+  function historySignature() { return JSON.stringify([scenario.deal, scenario.streets.map(st => st.actions.filter(a => a.filled)), cam.joinedMidHand]); }
+  function decisionValidation() {
+    const m = hand.m, street = Math.min(m.frontier, 3);
+    const result = decisions.validate({ bigBlind: scenario.bigBlind, players: scenario.opponents.length + 1, button: scenario.button,
+      toCall: m.toCall[street], next: m.next, pot: m.potShow[street],
+      folded: m.foldedAt.map(x => x !== null), contributions: m.street[street]?.contrib,
+      behind: [scenario.hero.stack,...scenario.opponents.map(o => o.stack)].map((s,i) => Math.max(0,s-m.contrib[i])),
+      hero: scenario.heroHidden ? null : scenario.hero.cards, board: scenario.board,
+      historyUncertain: (scenario.streets.slice(0, street + 1).some(st => st.actions.some(a => a.filled)) || (cam.joinedMidHand && scenario.streets.some(st => st.actions.some(a => a.cam)))) && cam.confirmedHistory !== historySignature() }, Date.now());
+    const local = cam.interfaceReading, T = decisions.table;
+    if (result.ready && local && T && T.seats.length === 5 && Date.now() - (cam.interfaceAt || 0) < 900) {
+      const mismatch = Object.entries(local.contributions || {}).some(([seat,value]) => Math.abs(T.seats[seat].bet - value) > 0.011) ||
+        Object.entries(local.actions || {}).some(([seat,action]) => action === 'fold' && !T.seats[seat].folded) ||
+        (local.pot !== null && local.pot !== undefined && Math.abs(local.pot - T.pot) > 0.011);
+      if (mismatch) { result.ready = false; result.issues.push('Local amounts or action labels disagree with the table reading.'); }
+    }
+    return result;
+  }
+  function renderDecision() {
+    const box = $('decisionNow'); if (!box) return;
+    if (!cam.stream) { box.hidden = true; box.textContent = ''; return; }
+    const state = decisionValidation(); box.hidden = !state.controls;
+    if (box.hidden) return;
+    const c = state.controls || decisions.current;
+    const heading = `Your turn · ${c.action === 'check' ? 'Check available' : 'Call ' + c.toCall}`;
+    const rec = state.ready ? currentRecommendation() : null;
+    const detail = !state.ready ? state.issues.join(' ') : rec ? `${rec.label}${rec.sizeText ? ' ' + rec.sizeText : ''} — ${rec.reasons[0] || ''}` : 'Calculating your decision…';
+    const uncertain = state.issues.some(x => x.includes('Earlier betting'));
+    const history = uncertain ? `<details><summary>Review action history</summary><p>${esc(hand.m.street.filter(Boolean).map((st,i) => `${STEP[i]}: ${st.actions.map(a => `${SC.seatName(scenario,a.seat)} ${a.text}`).join('; ')}`).join(' · '))}</p><button type="button" data-confirm-history>Confirm this history</button></details>` : '';
+    const html = `<strong>${esc(heading)}</strong><p>${esc(detail)}</p>${history}`;
+    if (box.innerHTML !== html) box.innerHTML = html;
+    if (rec) { const version = decisions.version; requestAnimationFrame(() => requestAnimationFrame(() => { if (version === decisions.version && decisionValidation().ready) decisions.painted(Date.now()); })); }
+  }
+  $('decisionNow').addEventListener('click', e => { if (e.target.closest('[data-confirm-history]')) { cam.confirmedHistory = historySignature(); renderDecision(); scheduleRender(); } });
+  function observeDecisionTable(T, capturedAt) {
+    if (cam.joinedMidHand === null && T.readable?.betting && Array.isArray(T.board)) {
+      const bb = T.unit === 'bb' ? 1 : T.blinds?.big || scenario.bigBlind;
+      cam.joinedMidHand = T.board.length > 0 || T.seats.some(s => s.bet > bb);
+    }
+    decisions.observeTable(T, capturedAt);
+    // A local detector owns turn visibility while that profile is selected.
+    if (cam.profile === 'generic' && T.controls) decisions.observe(T.controls, capturedAt, 'ai');
+    if (decisions.current && T.controls?.active && T.toAct !== 0) {
+      // Preserve the contradiction instead of replacing one witness with the other.
+      camNote('Action controls and seat indicator disagree; checking again.', false, true);
+    }
+  }
+  function stopInterfaceWorker() {
+    if (interfaceWorker) interfaceWorker.terminate();
+    interfaceWorker = null; interfaceBusy = false;
+    clearInterval(cam.decisionWatch); cam.decisionWatch = null;
+    clearTimeout(cam.interfaceTimer);
+    if (cam.interfaceFrame != null && $('camVideo').cancelVideoFrameCallback) $('camVideo').cancelVideoFrameCallback(cam.interfaceFrame);
+  }
+  function startInterfaceWorker() {
+    stopInterfaceWorker();
+    try {
+      const session = cam.session, worker = interfaceWorker = new Worker('interface-worker.js');
+      worker.onmessage = ({ data }) => {
+        if (session !== cam.session || interfaceWorker !== worker) return;
+        interfaceBusy = false;
+        if (data.context !== cameraContext()) return;
+        if (data.error) { camNote('Screen layout could not be read. Reframe the source screen.', true, true); return; }
+        if (data.result.hero) {
+          const reading = CameraPipeline.stableCards(cam.interfaceHistory || (cam.interfaceHistory = {}), { hero: data.result.hero, heroComplete: true, board: null, boardComplete: false });
+          if (reading) decide(reading, 'fast');
+        } else cam.interfaceHistory = {};
+        cam.interfaceReading = data.result; cam.interfaceAt = data.at;
+        const before = decisions.version;
+        const fresh = decisions.observe(data.result.controls, data.at, 'local');
+        if (before !== decisions.version) { adviceClient.cancel(); cameraRequests.cancel(); urgentToken++; urgentBusy = false; urgentLast = 0; scheduleRender(); }
+        if (data.result.controls?.active && !decisions.current) requestUrgent();
+        if (fresh || (decisions.current && !decisionValidation().ready)) requestUrgent();
+        renderDecision();
+      };
+      worker.onerror = () => { stopInterfaceWorker(); camNote('Local screen recognition unavailable; use automatic AI or restart the camera.', true); };
+    } catch (e) { camNote('Local screen recognition unavailable in this browser.', true); }
+    interfaceLoop();
+    cam.decisionWatch = setInterval(() => { if (cam.stream) { renderDecision(); if (decisions.current && !decisionValidation().ready) requestUrgent(); } }, 250);
+  }
+  // Controls are sampled independently of the expensive full-frame card recognizer.
+  function interfaceLoop() {
+    if (!cam.stream || cam.source === 'events') return;
+    const v = $('camVideo');
+    if (cam.profile !== 'generic' && v.videoWidth && !v.paused && !document.hidden && !interfaceBusy) {
+      const side = cam.rot % 180 !== 0, W = side ? v.videoHeight : v.videoWidth, H = side ? v.videoWidth : v.videoHeight;
+      const k = Math.min(1, 2000 / Math.max(W,H)), c = cam.sourceCv || (cam.sourceCv=document.createElement('canvas'));
+      const w=Math.round(W*k), h=Math.round(H*k); if(c.width!==w || c.height!==h) {c.width=w;c.height=h;}
+      const g=c.getContext('2d',{willReadFrequently:true}); g.setTransform(k,0,0,k,0,0);g.translate(W/2,H/2);g.rotate(cam.rot*Math.PI/180);g.drawImage(v,-v.videoWidth/2,-v.videoHeight/2);g.setTransform(1,0,0,1,0,0);
+      inspectInterface(c);
+    }
+    cam.interfaceTimer=setTimeout(()=>{
+      if(!cam.stream)return;
+      if(v.requestVideoFrameCallback)cam.interfaceFrame=v.requestVideoFrameCallback(interfaceLoop);else interfaceLoop();
+    },80);
+  }
+  function inspectInterface(canvas) {
+    if (cam.profile === 'generic' || interfaceBusy || !interfaceWorker) return;
+    const px = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    interfaceBusy = true;
+    interfaceWorker.postMessage({ id: ++interfaceSeq, context: cameraContext(), at: Date.now(), profile: cam.profile, corners: cam.corners,
+      pixels: px.buffer, width: canvas.width, height: canvas.height }, [px.buffer]);
+  }
+  async function requestUrgent() {
+    if (cam.source === 'events' || !$('camBets').checked || $('camVideo').paused || document.hidden) return;
+    if (urgentBusy || !aiReady() || !(cam.sourceCv || cam.fullCv) || Date.now() - urgentLast < 650) return;
+    const session = cam.session, token = ++urgentToken, started = Date.now(); urgentLast = started; urgentBusy = true;
+    cameraRequests.cancel(); // A full-table housekeeping read must not block an expiring decision.
+    try {
+      const full = !cam.live.fullAt || cam.live.seatMiss >= 2 || !!cam.live.planKey;
+      const T = await cameraRequest('/api/cards/table', async () => ({
+        body: JSON.stringify({ image: await jpeg(cam.sourceCv || cam.fullCv, 0.9), fast: true, live: !full, decision: true,
+          cards: true, seats: cam.profile === 'pure' ? 5 : scenario.opponents.length + 1, scale: tableScale() }),
+        headers: { 'Content-Type': 'application/json' }
+      }));
+      observeDecisionTable(T, started);
+      if (full) { cam.live.fullAt = Date.now(); cam.live.fullHand = hand.deal; if (T.readable.seats && $('camAuto').checked) followSeats(plausible(T), cam.live.inSync); }
+      // An explicit active control is a separate turn observation, not a fabricated betting action.
+      if (decisions.current && T.controls?.active && T.toAct === null) T.toAct = 0;
+      applyLive(T, started); renderDecision();
+    } catch (e) { aiFailed(e); } finally { if (session === cam.session && token === urgentToken) urgentBusy = false; }
+  }
+  let calibrationPoints = [];
+  $('frameScreen').addEventListener('click', () => {
+    if (!cam.fullCv) return;
+    calibrationPoints = []; const c = $('screenCorners'); c.width = cam.fullCv.width; c.height = cam.fullCv.height;
+    c.getContext('2d').drawImage(cam.fullCv, 0, 0); $('screenCalibration').showModal();
+  });
+  $('cancelCorners').addEventListener('click', () => $('screenCalibration').close());
+  $('screenCorners').addEventListener('click', e => {
+    const c = e.currentTarget, r = c.getBoundingClientRect(), p = [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height];
+    calibrationPoints.push(p); const g = c.getContext('2d'); g.fillStyle = '#ffd36a'; g.beginPath(); g.arc(p[0]*c.width, p[1]*c.height, 8, 0, Math.PI*2); g.fill();
+    if (calibrationPoints.length === 4) {
+      try { InterfaceVision.homography(calibrationPoints); cam.sourceVersion = (cam.sourceVersion || 0) + 1; cam.corners = calibrationPoints.slice(); decisions.reset(); cameraRequests.cancel(); renderDecision(); $('screenCalibration').close(); }
+      catch (err) { calibrationPoints = []; camNote(err.message, true); }
+    }
+  });
+  // Producers call connect explicitly, then send ordered snapshots and a heartbeat at least once a second.
+  window.connectPokerSource = async () => {
+    if (cam.stream) stopCamera();
+    await startCamera('events'); cam.profile = 'generic'; $('sourceProfile').value = 'generic';
+    const session = cam.session; let sequence = -1;
+    return {
+      push(message) {
+        if (!cam.stream || session !== cam.session) throw new Error('Source session has ended.');
+        if (!Number.isInteger(message.sequence) || message.sequence <= sequence) throw new Error('Source sequence must increase.');
+        const T = StructuredPokerSource.observation(message.observation);
+        if (!message.scenario) throw new Error('Structured sources must supply the actual scenario/action history.');
+        const parsed = SC.normalize(message.scenario);
+        if (parsed.fixes.length) throw new Error('Source scenario requires corrections: ' + parsed.fixes.join('; '));
+        const normalized = parsed.scenario;
+        if (SC.replay(normalized).dropped) throw new Error('Source action history contains invalid actions.');
+        sequence = message.sequence;
+        if (JSON.stringify(normalized) !== JSON.stringify(scenario)) loadScenario(normalized);
+        const at = Date.now(); decisions.observeTable(T, at); decisions.observe(T.controls, at, 'structured');
+        renderDecision(); return decisionValidation();
+      },
+      close() { if (session === cam.session) stopCamera(); }
+    };
+  };
+  // Explicit diagnostics for replay tooling; no pixels or credentials are retained.
+  window.cameraDiagnostics = () => ({ ...(cam.stream ? decisions.metrics() : cam.lastMetrics || decisions.metrics()), sourceTimeMs: cam.stream ? $('camVideo').currentTime * 1000 : cam.lastSourceTime || 0,
+    controls: decisionValidation().controls || null, observed: cam.interfaceReading || null,
+    advice: decisionValidation().ready ? adviceClient.result : null, issues: decisionValidation().issues });
+  window.configurePokerScreen = corners => { InterfaceVision.homography(corners); cam.sourceVersion = (cam.sourceVersion || 0) + 1; cam.corners = corners; decisions.reset(); cameraRequests.cancel(); };
+
   // ----- the camera loop -----
-  async function startCamera() {
-    const session = ++cam.session; cameraRequests.cancel();
+  async function startCamera(source = 'camera', file = null) {
+    const session = ++cam.session; cameraRequests.cancel(); urgentBusy = false; urgentLast = 0; cam.corners = null; cam.source = source; cam.sourceCv = null; cam.interfaceReading = null; cam.interfaceHistory = {}; cam.interfaceAt = 0; cam.joinedMidHand = null; cam.confirmedHistory = null;
     $('camOff').hidden = true; $('camOn').hidden = false; camNote('Starting the camera… allow access if your browser asks.');
     $('camBetsRow').hidden = $('camSync').hidden = $('camAiCardsRow').hidden = !(HV && HV.api.has('vision'));
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camNote(window.isSecureContext ? 'This browser has no camera access.' : 'The camera needs a secure (https) page.', true); return; }
+    if (source === 'camera' && (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)) { camNote(window.isSecureContext ? 'This browser has no camera access.' : 'The camera needs a secure (https) page.', true); return; }
     try {
       await CardVision.init();
       if (session !== cam.session) return;
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+      let stream;
+      if (source === 'screen') stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      else if (source === 'video' || source === 'events') stream = { getTracks: () => [], getVideoTracks: () => [] };
+      else stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
       if (session !== cam.session) { stream.getTracks().forEach(t => t.stop()); return; }
       cam.stream = stream;
     } catch (e) {
@@ -1848,22 +2037,30 @@
       camNote(e && e.name === 'NotAllowedError' ? 'Camera access is blocked for this site. Allow it in the site settings (the icon by the address bar), then try again.' : e && e.name === 'NotFoundError' ? 'No camera was found.' : `The camera could not start${e && e.message ? `: ${e.message}` : ''}.`, true);
       return;
     }
-    const v = $('camVideo'); v.srcObject = cam.stream; try { await v.play(); } catch (e) {}
+    const v = $('camVideo');
+    if (source === 'video') { cam.videoUrl = URL.createObjectURL(file); v.srcObject = null; v.src = cam.videoUrl; }
+    else if (source !== 'events') { v.removeAttribute('src'); v.srcObject = cam.stream; }
+    for (const track of cam.stream.getTracks()) track.addEventListener('ended', () => { if (session === cam.session) stopCamera(); });
+    v.onended = () => { if (source === 'video') stopCamera(); };
+    $('toggleReplay').hidden = $('replaySeek').hidden = source !== 'video';
+    v.ontimeupdate = () => { if (source === 'video' && Number.isFinite(v.duration)) { $('replaySeek').max = v.duration; $('replaySeek').value = v.currentTime; } };
+    try { if (source !== 'events') await v.play(); } catch (e) { camNote('The source could not start playing.', true); stopCamera(); return; }
     if (session !== cam.session || !cam.stream) return;
     $('camDot').classList.add('on');
     Object.assign(cam, { syncBusy: false, seen: [], four: false, local: null, lock: null, asked: null, prevThumb: null, hold: null, needCheck: false, betNote: '', betAt: 0, seatNote: '', sync: null, synced: false, quality: null, rotVotes: [],
       live: { seq: 0, applied: 0, inflight: 0, lastSent: 0, at: 0, reads: 0, ms: 0, fullMs: 0, fullAt: 0, fullHand: null, fullBusy: false, box: null, seatMiss: 0, inSync: false, bad: 0, changeAt: 0, changedTable: false, lag: 0, lagAvg: 0, planKey: '', fixKey: '' } });
     cam.ai.busy = false; cam.localKey = ''; cam.cardHistory = {}; cam.mem = null; cam.newPair = null; cam.qAt = 0; $('camSync').disabled = false;
     camNote('Point it at the table so the cards fill most of the picture. Hold steady.');
-    startVisionWorker(); renderCamRead(); camLoop();
+    decisions.reset(); startInterfaceWorker(); startVisionWorker(); renderCamRead(); if (source !== 'events') camLoop();
   }
   function stopCamera() {
-    cam.session++; cameraRequests.cancel(); stopVisionWorker();
+    cam.lastSourceTime = $('camVideo').currentTime * 1000; cam.lastMetrics = decisions.metrics();
+    cam.session++; cameraRequests.cancel(); stopVisionWorker(); stopInterfaceWorker(); decisions.reset(); adviceClient.cancel(); renderDecision();
     cam.syncBusy = false; cam.ai.busy = false;
     if (cam.videoFrame != null && $('camVideo').cancelVideoFrameCallback) $('camVideo').cancelVideoFrameCallback(cam.videoFrame);
     clearTimeout(cam.timer); cam.timer = 0;
     if (cam.stream) cam.stream.getTracks().forEach(t => t.stop());
-    cam.stream = null; $('camVideo').srcObject = null; $('camDot').classList.remove('on'); $('prog').classList.remove('steady'); $('camOn').hidden = true; $('camOff').hidden = false; cam.synced = false;
+    cam.stream = null; $('camVideo').pause(); $('camVideo').srcObject = null; $('camVideo').removeAttribute('src'); if (cam.videoUrl) { URL.revokeObjectURL(cam.videoUrl); cam.videoUrl = null; } $('camDot').classList.remove('on'); $('prog').classList.remove('steady'); $('camOn').hidden = true; $('camOff').hidden = false; cam.synced = false;
   }
   async function camLoop() {
     const context = cameraContext();
@@ -1881,10 +2078,11 @@
       const g = c.getContext('2d', { willReadFrequently: true });
       const upright = (gg, kk, dx, dy) => { gg.setTransform(kk, 0, 0, kk, -dx * kk, -dy * kk); gg.translate(UW / 2, UH / 2); gg.rotate(cam.rot * Math.PI / 180); gg.drawImage(v, -vw / 2, -vh / 2, vw, vh); gg.setTransform(1, 0, 0, 1, 0, 0); };
       upright(g, k, cx, cy);
-      if (!$('camFull').hidden) { // the crop editor shows the whole picture
-        const kf = Math.min(1, 1280 / Math.max(UW, UH)), f = cam.fullCv || (cam.fullCv = document.createElement('canvas'));
+      { // Keep the whole source screen for control detection and urgent reads.
+        const kf = Math.min(1, (cam.profile === 'pure' ? 2000 : 1280) / Math.max(UW, UH)), f = cam.fullCv || (cam.fullCv = document.createElement('canvas'));
         if (f.width !== Math.round(UW * kf) || f.height !== Math.round(UH * kf)) { f.width = Math.round(UW * kf); f.height = Math.round(UH * kf); }
         upright(f.getContext('2d'), kf, 0, 0);
+        // Local control capture has its own video-frame loop.
       }
       const px = g.getImageData(0, 0, W, H).data;
       const pic = updateThumb(px, W, H);
@@ -1994,6 +2192,7 @@
   cam.rot = [0, 90, 180, 270].includes(store.get('walkthrough.camRot')) ? store.get('walkthrough.camRot') : 0;
   function setRot(r) {
     cameraRequests.cancel();
+    cam.corners = null; decisions.reset();
     cam.rot = r; store.set('walkthrough.camRot', r); cam.prevThumb = null; cam.asked = null; cam.seen = []; cam.cardHistory = {}; cam.localKey = ''; if (cam.live) { cam.live.box = null; cam.live.fullAt = 0; }
     if (cam.crop) { setCrop(null, 'reset'); cam.wantFit = true; } // a crop belongs to one way up
     if (ed.crop) ed.crop = { ...FULL_CROP };
@@ -2126,6 +2325,12 @@
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('camFull').hidden) closeCropEditor(); });
   $('camBtn').addEventListener('click', () => (cam.stream ? stopCamera() : startCamera()));
   $('camClose').addEventListener('click', stopCamera);
+  $('shareScreen').addEventListener('click', () => startCamera('screen'));
+  $('toggleReplay').addEventListener('click', () => { const v = $('camVideo'); if (v.paused) { v.play(); $('toggleReplay').textContent = 'Pause replay'; } else { v.pause(); $('toggleReplay').textContent = 'Resume replay'; } });
+  $('replaySeek').addEventListener('input', e => { cameraRequests.cancel(); decisions.reset(); adviceClient.cancel(); cam.cardHistory = {}; cam.interfaceHistory = {}; cam.mem = null; cam.sourceVersion = (cam.sourceVersion || 0) + 1; $('camVideo').currentTime = +e.target.value; renderDecision(); });
+  $('replayVideo').addEventListener('change', e => { const f = e.target.files[0]; if (f) startCamera('video', f); });
+  $('sourceProfile').addEventListener('change', e => { cam.sourceVersion = (cam.sourceVersion || 0) + 1; cameraRequests.cancel(); cam.profile = e.target.value; cam.sourceCv = null; cam.corners = null; cam.interfaceReading = null; decisions.reset(); adviceClient.cancel(); renderDecision(); });
+  $('clearScreen').addEventListener('click', () => { cameraRequests.cancel(); cam.sourceVersion = (cam.sourceVersion || 0) + 1; cam.corners = null; decisions.reset(); renderDecision(); });
   // Hide or show the camera's picture; the reading carries on either way.
   const setCamView = show => { $('camBody').classList.toggle('folded', !show); $('camFold').textContent = show ? '▴ Hide view' : '▾ Show view'; $('camFold').setAttribute('aria-expanded', show ? 'true' : 'false'); store.set('walkthrough.camView', show); };
   $('camFold').addEventListener('click', () => setCamView($('camBody').classList.contains('folded')));
@@ -2362,7 +2567,8 @@
   const ACT_CLS = { fold: 'bad', check: 'mid', call: 'mid', bet: 'good', raise: 'good', wait: 'mid' };
   let lastAdvice = null; // {key: deal:street, html}: the advice last shown for this street
   function adviceBlock(S) {
-    const r = SC.recommendation(scenario, step, hand.hero, board(), S);
+    const r = currentRecommendation();
+    if (!r) return `<section class="blk advice"><h3>What you should do</h3><p>${esc(cam.stream && !decisionValidation().ready ? decisionValidation().issues.join(' ') : 'Calculating the current decision…')}</p></section>`;
     const cls = ACT_CLS[r.action];
     if (r.preview) {
       // not your turn: what to do when the action reaches you

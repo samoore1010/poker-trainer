@@ -182,4 +182,10 @@ CHROMIUM=/usr/bin/chromium node scripts/camera-check.js
 
 This starts its own local server and uses a synthetic canvas camera, without provider credentials. It checks card recognition in the worker, worker/fallback output equivalence, stop/restart, stale full-table response rejection, and immediate multi-action commits. Playwright is an optional development tool, not a runtime dependency.
 
-These checks do not establish real-video accuracy or live-provider speed. Before tuning the new suit-confidence margin or changing recognition models, measure labeled recordings covering glare, blur, decimal bets, occlusion, fast actions and hand transitions. Track incorrect committed fields, missed events and median/p95 time from visible change to dashboard paint. The recognizer still targets this app's deck/layout; general-purpose OCR, perspective calibration and trained deck recognition remain future work.
+These checks do not establish real-video accuracy or live-provider speed. Before tuning the new suit-confidence margin or changing recognition models, measure labeled recordings covering glare, blur, decimal bets, occlusion, fast actions and hand transitions. Track incorrect committed fields, missed events and median/p95 time from visible change to dashboard paint. The general card recognizer targets this app's deck/layout. The Pure profile and perspective framing described below add a specific additional layout; general-purpose OCR and trained deck recognition still require separate evaluation.
+
+## Action-aware camera advice
+
+The camera now has an urgent decision path: active action controls and their call price are checked separately from the full hand history. The **Pure portrait (5 seats)** profile provides local control and colored hero-card recognition. **Frame source screen** corrects perspective without losing the bottom controls. **Share screen** and **Replay video** provide alternatives to filming a display.
+
+Advice uses a dedicated worker; old jobs are cancelled when the decision changes. Contradictory amounts or incomplete history are shown explicitly before a recommendation is presented. See [camera decisions and source inputs](docs/camera-decisions.md) for setup, supported layouts, regression/replay commands, metrics, limitations and the structured-source API.

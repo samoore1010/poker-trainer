@@ -44,7 +44,7 @@ module.exports = function cardRoutes(router, { openai, vision }) {
   // range, so a misplaced decimal point stands out.
   router.post('/api/cards/table', { metered: 'camera' }, async (req, res, { send }) => {
     if (!vision) throw new HttpError(503, 'vision_not_configured', 'Camera reading needs ANTHROPIC_API_KEY or OPENAI_API_KEY on the server.');
-    const { image, player, fast, live, seats, cards, scale: sc } = await readJson(req, 3 * 1024 * 1024);
+    const { image, player, fast, live, seats, cards, decision, scale: sc } = await readJson(req, 3 * 1024 * 1024);
     // the table's scale (blinds, stack range): plain numbers only, so the prompt can't carry anything else
     const num = x => (typeof x === 'number' && Number.isFinite(x) && x > 0 && x < 1e9 ? x : 0);
     const scale = sc && typeof sc === 'object' && num(sc.bb) ? { sb: num(sc.sb), bb: num(sc.bb), lo: num(sc.lo), hi: num(sc.hi) } : null;
@@ -54,10 +54,10 @@ module.exports = function cardRoutes(router, { openai, vision }) {
     const who = typeof player === 'string' ? player.slice(0, 300) : '';
     if (live === true) {
       // following live: the short read (bets, folds, whose turn, pot, cards)
-      const raw = await vision.readLive({ data: m[2], mime: m[1], player: who, seats: Number.isInteger(seats) && seats >= 2 && seats <= 9 ? seats : 0, cards: cards !== false, scale });
+      const raw = await vision.readLive({ data: m[2], mime: m[1], player: who, seats: Number.isInteger(seats) && seats >= 2 && seats <= 9 ? seats : 0, cards: cards !== false, decision: decision === true, scale });
       return send.json(200, { ...normalizeLive(raw), provider: vision.name, model: vision.liveModel, ms: Date.now() - started });
     }
-    const raw = await vision.readTable({ data: m[2], mime: m[1], player: who, fast: fast === true, scale });
+    const raw = await vision.readTable({ data: m[2], mime: m[1], player: who, fast: fast === true, decision: decision === true, scale });
     send.json(200, { ...normalizeTable(raw), provider: vision.name, model: fast === true ? vision.liveModel : vision.syncModel, ms: Date.now() - started });
   });
 };
